@@ -36,7 +36,11 @@ answer:
   deterministic project model (components, hook bindings, render edges,
   prop chains with provenance: server-fetch / local state / setter / query /
   context) — e.g. "server state drilled 3+ levels → React Query",
-  "value+setter fanning out across branches → Context".
+  "value+setter fanning out across branches → Context". Provenance follows
+  transformations (`rows = normalize(data)` inherits `data`'s origin;
+  transformed hops render as `~[prop]~>`) and sees through custom hooks —
+  `useUser()` wrapping a fetch-in-effect, hooks calling hooks across files,
+  even a setter handed into a fetching hook (`useLoad(setUser)`).
 - **Rules are self-verified on insert.** A rule convention must mechanically
   flag its own `bad_example` and pass its own `good_example`, or the store
   rejects it. You cannot store a convention that can't be demonstrated.

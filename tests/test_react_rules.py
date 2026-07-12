@@ -229,9 +229,15 @@ function C() {
 """)
         assert facts.components["C"].bindings["theme"].origin == "context"
 
-    def test_call_result_breaks_provenance(self):
+    def test_call_result_becomes_derived_pass(self):
         facts = extract_file_facts("X.tsx",
             "const C = ({ items }) => <Child items={filterItems(items)} />;\n")
+        p = facts.components["C"].passes[0]
+        assert p.derived and "items" in p.sources
+
+    def test_literal_only_expression_has_no_sources(self):
+        facts = extract_file_facts("X.tsx",
+            "const C = () => <Child items={[1, 2, 3]} />;\n")
         assert facts.components["C"].passes == []
 
     def test_host_elements_ignored(self):
@@ -397,6 +403,328 @@ const B = ({ v }) => <i>{v}</i>;
             "react-prop-drilling", bad_analysis,
             {"max_depth": 3, "origins": ["local-state"]})
         assert len(only_local) == 1 and "'filter'" in only_local[0].detail
+
+
+# --------------------------------------------------------- derived values
+
+
+class TestDerivedValues:
+    def test_declared_transform_inherits_origin(self):
+        analysis = analyze_project({"App.tsx": """
+function App() {
+  const [data, setData] = useState(null);
+  useEffect(() => { fetch("/api").then((r) => r.json()).then(setData); }, []);
+  const rows = normalize(data);
+  return <Grid rows={rows} />;
+}
+const Grid = ({ rows }) => <table>{rows}</table>;
+"""})
+        binding = analysis.components["App"].bindings["rows"]
+        assert binding.origin == "server-state"
+        assert binding.origin_root == "data"
+        chain = next(c for c in analysis.chains if c.source == "rows")
+        assert chain.origin == "server-state"
+
+    def test_use_memo_inherits_origin(self):
+        analysis = analyze_project({"App.tsx": """
+function App() {
+  const [items, setItems] = useState([]);
+  const sorted = useMemo(() => [...items].sort(), [items]);
+  return <List items={sorted} />;
+}
+const List = ({ items }) => <ul>{items}</ul>;
+"""})
+        assert analysis.components["App"].bindings["sorted"].origin == "local-state"
+
+    def test_destructure_from_value_inherits(self):
+        facts = extract_file_facts("X.tsx", """
+function C() {
+  const { data: payload } = useQuery({ queryKey: ["k"] });
+  const { rows } = payload;
+  return <div>{rows}</div>;
+}
+""")
+        comp = facts.components["C"]
+        assert comp.bindings["rows"].derived_from == ("payload",)
+
+    def test_inline_transform_continues_chain(self):
+        analysis = analyze_project({
+            "App.tsx": """
+import Layout from "./Layout";
+function App() {
+  const [user, setUser] = useState(null);
+  useEffect(() => { fetch("/u").then((r) => r.json()).then(setUser); }, []);
+  return <Layout user={user} />;
+}
+""",
+            "Layout.tsx": """
+import Card from "./Card";
+export default function Layout({ user }) {
+  return <Card profile={decorate(user)} />;
+}
+""",
+            "Card.tsx": """
+import Avatar from "./Avatar";
+export default function Card({ profile }) {
+  return <Avatar profile={profile} />;
+}
+""",
+            "Avatar.tsx": "export default function Avatar({ profile }) { return <img alt={profile} />; }\n",
+        })
+        chain = max((c for c in analysis.chains if c.source == "user"),
+                    key=lambda c: c.depth)
+        assert chain.depth == 3
+        assert chain.hops[1].derived  # the decorate() hop
+        assert "~[profile]~>" in chain.path()
+
+    def test_derived_local_declaration_forwards_chain(self):
+        analysis = analyze_project({"App.tsx": """
+function Mid({ user }) {
+  const banner = makeBanner(user);
+  return <Leaf banner={banner} />;
+}
+function App() {
+  const [user, setUser] = useState(null);
+  useEffect(() => { fetch("/u").then(setUser); }, []);
+  return <Mid user={user} />;
+}
+const Leaf = ({ banner }) => <b>{banner}</b>;
+"""})
+        chain = max((c for c in analysis.chains if c.source == "user"),
+                    key=lambda c: c.depth)
+        assert chain.depth == 2 and chain.hops[1].derived
+
+    def test_callback_wrapped_setter_counts_for_fan_out(self):
+        analysis = analyze_project({"App.tsx": """
+function App() {
+  const [filter, setFilter] = useState("");
+  return (
+    <div>
+      <Toolbar onChange={(v) => setFilter(v)} />
+      <Results filter={filter} />
+    </div>
+  );
+}
+const Toolbar = ({ onChange }) => <input onChange={onChange} />;
+const Results = ({ filter }) => <div>{filter}</div>;
+"""})
+        findings = run_semantic_check(
+            "react-shared-mutable-state", analysis, {"min_branches": 2})
+        assert len(findings) == 1
+        assert "Toolbar" in findings[0].detail and "Results" in findings[0].detail
+
+    def test_provider_value_is_not_a_pass(self):
+        facts = extract_file_facts("X.tsx", """
+function App() {
+  const [v, setV] = useState(1);
+  return <Ctx.Provider value={{ v, setV }}><Child /></Ctx.Provider>;
+}
+""")
+        assert all(p.child == "Child" or False for p in facts.components["App"].passes)
+        assert facts.components["App"].passes == []
+
+    def test_mixed_sources_pick_strongest_origin(self):
+        analysis = analyze_project({"App.tsx": """
+function App() {
+  const [user, setUser] = useState(null);
+  const [note, setNote] = useState("");
+  useEffect(() => { fetch("/u").then(setUser); }, []);
+  return <Panel data={merge(user, note)} />;
+}
+const Panel = ({ data }) => <div>{data}</div>;
+"""})
+        chain = next(c for c in analysis.chains
+                     if c.origin_component == "App" and c.hops[0].prop == "data")
+        assert chain.source == "user" and chain.origin == "server-state"
+
+    def test_derived_message_mentions_root(self):
+        analysis = analyze_project({"App.tsx": """
+import Layout from "./Layout";
+function App() {
+  const [data, setData] = useState(null);
+  useEffect(() => { fetch("/d").then(setData); }, []);
+  const rows = normalize(data);
+  return <Layout rows={rows} />;
+}
+const Layout = ({ rows }) => <Mid rows={rows} />;
+const Mid = ({ rows }) => <Leaf rows={rows} />;
+const Leaf = ({ rows }) => <div>{rows}</div>;
+"""})
+        findings = run_semantic_check(
+            "react-server-state-drilling", analysis, {"max_depth": 3})
+        assert len(findings) == 1
+        assert "'rows' (derived from 'data')" in findings[0].detail
+
+
+# ------------------------------------------------------------ custom hooks
+
+
+class TestCustomHooks:
+    def test_hook_wrapping_fetch_effect_is_server_state(self):
+        analysis = analyze_project({"App.tsx": """
+function useUser() {
+  const [user, setUser] = useState(null);
+  useEffect(() => { fetch("/api/user").then((r) => r.json()).then(setUser); }, []);
+  return { user, setUser };
+}
+function App() {
+  const { user } = useUser();
+  return <Layout user={user} />;
+}
+const Layout = ({ user }) => <Mid user={user} />;
+const Mid = ({ user }) => <Leaf user={user} />;
+const Leaf = ({ user }) => <div>{user}</div>;
+"""})
+        assert analysis.components["App"].bindings["user"].origin == "server-state"
+        findings = run_semantic_check(
+            "react-server-state-drilling", analysis, {"max_depth": 3})
+        assert len(findings) == 1
+
+    def test_hook_in_other_file_resolves_via_import(self):
+        analysis = analyze_project({
+            "useUser.ts": """
+import { useState, useEffect } from "react";
+export function useUser() {
+  const [user, setUser] = useState(null);
+  useEffect(() => { fetch("/u").then(setUser); }, []);
+  return { user };
+}
+""",
+            "App.tsx": """
+import { useUser } from "./useUser";
+export function App() {
+  const { user } = useUser();
+  return <div>{user}</div>;
+}
+""",
+        })
+        assert analysis.components["App"].bindings["user"].origin == "server-state"
+
+    def test_hook_object_return_with_alias_and_partner(self):
+        analysis = analyze_project({"App.tsx": """
+function useFilter() {
+  const [filter, setFilter] = useState("");
+  return { filter, setFilter };
+}
+function App() {
+  const { filter: f, setFilter: setF } = useFilter();
+  return <div><A f={f} onF={setF} /><B f={f} /></div>;
+}
+const A = ({ f, onF }) => <i>{f}</i>;
+const B = ({ f }) => <i>{f}</i>;
+"""})
+        bindings = analysis.components["App"].bindings
+        assert bindings["f"].origin == "local-state" and bindings["f"].partner == "setF"
+        assert bindings["setF"].origin == "setter" and bindings["setF"].partner == "f"
+        findings = run_semantic_check(
+            "react-shared-mutable-state", analysis, {"min_branches": 2})
+        assert len(findings) == 1
+
+    def test_hook_array_return(self):
+        analysis = analyze_project({"App.tsx": """
+function useToggle() {
+  const [on, setOn] = useState(false);
+  return [on, setOn];
+}
+function App() {
+  const [open, setOpen] = useToggle();
+  return <div>{open}</div>;
+}
+"""})
+        bindings = analysis.components["App"].bindings
+        assert bindings["open"].origin == "local-state"
+        assert bindings["open"].partner == "setOpen"
+        assert bindings["setOpen"].origin == "setter"
+
+    def test_hook_wrapping_use_query_is_exempt(self):
+        analysis = analyze_project({"App.tsx": """
+function useUser() {
+  const { data: user } = useQuery({ queryKey: ["u"] });
+  return { user };
+}
+function App() {
+  const { user } = useUser();
+  return <Layout user={user} />;
+}
+const Layout = ({ user }) => <Mid user={user} />;
+const Mid = ({ user }) => <Leaf user={user} />;
+const Leaf = ({ user }) => <div>{user}</div>;
+"""})
+        assert analysis.components["App"].bindings["user"].origin == "query"
+        assert run_semantic_check(
+            "react-server-state-drilling", analysis, {"max_depth": 3}) == []
+
+    def test_hook_forwarding_use_query_directly(self):
+        analysis = analyze_project({"App.tsx": """
+const useUser = () => useQuery({ queryKey: ["u"] });
+function App() {
+  const q = useUser();
+  return <div>{q}</div>;
+}
+"""})
+        assert analysis.components["App"].bindings["q"].origin == "query"
+
+    def test_hook_calling_hook(self):
+        analysis = analyze_project({"App.tsx": """
+function useFetched() {
+  const [data, setData] = useState(null);
+  useEffect(() => { fetch("/d").then(setData); }, []);
+  return { data };
+}
+function useReport() {
+  const { data } = useFetched();
+  return { report: data };
+}
+function App() {
+  const { report } = useReport();
+  return <div>{report}</div>;
+}
+"""})
+        assert analysis.components["App"].bindings["report"].origin == "server-state"
+
+    def test_setter_passed_into_fetching_hook_promotes_state(self):
+        analysis = analyze_project({"App.tsx": """
+function useLoad(set) {
+  useEffect(() => { fetch("/d").then((r) => r.json()).then(set); }, []);
+}
+function App() {
+  const [data, setData] = useState(null);
+  useLoad(setData);
+  return <Layout data={data} />;
+}
+const Layout = ({ data }) => <Mid data={data} />;
+const Mid = ({ data }) => <Leaf data={data} />;
+const Leaf = ({ data }) => <div>{data}</div>;
+"""})
+        assert analysis.components["App"].bindings["data"].origin == "server-state"
+        findings = run_semantic_check(
+            "react-server-state-drilling", analysis, {"max_depth": 3})
+        assert len(findings) == 1
+
+    def test_setter_forwarded_hook_to_hook_promotes(self):
+        analysis = analyze_project({"App.tsx": """
+function useFetchInto(write) {
+  useEffect(() => { fetch("/d").then(write); }, []);
+}
+function useLoader(sink) {
+  useFetchInto(sink);
+}
+function App() {
+  const [rows, setRows] = useState([]);
+  useLoader(setRows);
+  return <div>{rows}</div>;
+}
+"""})
+        assert analysis.components["App"].bindings["rows"].origin == "server-state"
+
+    def test_unknown_hook_stays_local(self):
+        analysis = analyze_project({"App.tsx": """
+function App() {
+  const { user } = useSomethingImported();
+  return <div>{user}</div>;
+}
+"""})
+        assert analysis.components["App"].bindings["user"].origin == "local"
 
 
 # ------------------------------------------------------- engine integration
