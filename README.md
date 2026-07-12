@@ -73,9 +73,20 @@ acode corpus stats
 acode search --language python --query "logging print forbidden"
 acode search --language python --code-file some/route.py   # rank by AST shape
 
-# 3. register the MCP server with Claude Code
+# 3. run the pipeline directly from the CLI (observable end to end)
+acode check src/status.ts                     # deterministic verdict, no LLM
+acode generate "shipment status lifecycle" --language typescript --verbose
+acode review src/status.ts --verbose          # mechanical verdict + LLM fix
+
+# 4. register the MCP server with Claude Code
 claude mcp add acode -- acode serve
 ```
+
+`--verbose` streams every pipeline stage to stderr as it happens
+(`retrieve → rules → synthesize → verify#N → repair#N → done`), and the JSON
+result always carries the same events as a structured `trace` array — so you
+can see exactly which conventions were retrieved, what the LLM produced, which
+rules failed, and how each repair iteration changed the code.
 
 The convention JSON files in `conventions/` are the corpus's source of truth;
 the SQLite database is a build artifact — rerun `acode corpus build` any time
