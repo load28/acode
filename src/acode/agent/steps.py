@@ -67,6 +67,61 @@ def check(code: str, language: str, rules: list[Rule]) -> CheckReport:
     return _ENGINE.check(code, language, rules)
 
 
+def check_project(files: dict[str, str], language: str,
+                  rules: list[Rule]) -> CheckReport:
+    """Whole-project check: semantic (cross-file) rules see every file at
+    once; single-file rules run per matching file."""
+    return _ENGINE.check_project(files, language, rules)
+
+
+_PROJECT_EXTENSIONS = (".tsx", ".jsx", ".ts", ".js")
+_PROJECT_SKIP_DIRS = {"node_modules", "dist", "build", ".next", "coverage"}
+
+
+def load_project_files(path: str, max_files: int = 500) -> dict[str, str]:
+    """Collect React-relevant sources under `path` (or the single file),
+    keyed by path relative to it. Deterministic: sorted, bounded."""
+    from pathlib import Path
+
+    root = Path(path)
+    if root.is_file():
+        return {root.name: root.read_text(encoding="utf-8")}
+    files: dict[str, str] = {}
+    candidates = sorted(
+        p for p in root.rglob("*")
+        if p.suffix in _PROJECT_EXTENSIONS
+        and not any(part in _PROJECT_SKIP_DIRS or part.startswith(".")
+                    for part in p.relative_to(root).parts)
+    )
+    for p in candidates[:max_files]:
+        files[str(p.relative_to(root))] = p.read_text(encoding="utf-8")
+    return files
+
+
+def project_rules(store: ConventionStore, files: dict[str, str],
+                  language: str, metadata: dict[str, Any] | None) -> list[Rule]:
+    """Rules applicable to a project: the requested language plus every
+    language present among the files, deduplicated by rule id."""
+    from ..astcore.parser import language_for_path
+    from ..astcore.rules import compatible_rule_languages
+
+    languages = {language}
+    for path in files:
+        detected = language_for_path(path)
+        if detected:
+            languages.add(detected)
+    for lang in list(languages):
+        languages.update(compatible_rule_languages(lang))
+    rules: list[Rule] = []
+    seen: set[str] = set()
+    for lang in sorted(languages):
+        for rule in applicable_rules(store, lang, metadata):
+            if rule.id not in seen:
+                seen.add(rule.id)
+                rules.append(rule)
+    return rules
+
+
 def extract_code_block(text: str) -> str | None:
     """First fenced code block in an LLM reply, else None."""
     match = re.search(r"```[^\n]*\n(.*?)```", text, re.DOTALL)

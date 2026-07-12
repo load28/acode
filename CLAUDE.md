@@ -57,7 +57,8 @@ acode serve                   # MCP 서버 (stdio)
 
 ## 저장소 구조 요약
 
-- `src/acode/astcore` — tree-sitter 파싱, AST 핑거프린트, 결정적 룰 엔진
+- `src/acode/astcore` — tree-sitter 파싱, AST 핑거프린트, 결정적 룰 엔진,
+  React 크로스 파일 시맨틱 분석기 (`react.py`: prop 체인 + 상태 출처)
 - `src/acode/rag` — SQLite 컨벤션 저장소, 검색, 코드베이스 인덱서
 - `src/acode/llm` — LLM 프로바이더 (claude CLI 기본, API 폴백)
 - `src/acode/agent` — 파이프라인 단계 + ADK 에이전트 오케스트레이션

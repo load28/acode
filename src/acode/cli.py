@@ -5,6 +5,8 @@
     acode export                         dump all conventions as JSON
     acode list [--language L]            list conventions
     acode check <file> [--language L]    mechanical rule check
+    acode check-project <path>           cross-file semantic check (React
+                                         prop drilling / state origins)
     acode search --language L [...]      hybrid RAG search (BM25+AST+metadata)
     acode index <path> [--language L]    index a codebase as patterns
     acode corpus build [...]             (re)build the corpus database
@@ -47,6 +49,15 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("check", help="mechanically check a file")
     p.add_argument("file")
     p.add_argument("--language")
+
+    p = sub.add_parser(
+        "check-project",
+        help="check a directory with cross-file semantic rules "
+             "(React prop drilling, state-origin analysis) + per-file rules")
+    p.add_argument("path")
+    p.add_argument("--language", default="tsx",
+                   help="language whose semantic rules apply (default: tsx)")
+    p.add_argument("--max-files", type=int, default=500)
 
     p = sub.add_parser("search", help="hybrid search (BM25 + AST + metadata)")
     p.add_argument("--language", required=True)
@@ -159,6 +170,19 @@ def main(argv: list[str] | None = None) -> int:
         rules = steps.applicable_rules(store, language, None)
         report = steps.check(code, language, rules)
         json.dump(report.to_dict(), sys.stdout, ensure_ascii=False, indent=2)
+        print()
+        return 0 if report.passed else 1
+
+    if args.command == "check-project":
+        files = steps.load_project_files(args.path, max_files=args.max_files)
+        if not files:
+            print(f"no checkable source files under {args.path!r}", file=sys.stderr)
+            return 2
+        rules = steps.project_rules(store, files, args.language, None)
+        report = steps.check_project(files, args.language, rules)
+        out = report.to_dict()
+        out["files_checked"] = sorted(files)
+        json.dump(out, sys.stdout, ensure_ascii=False, indent=2)
         print()
         return 0 if report.passed else 1
 

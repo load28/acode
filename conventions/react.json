@@ -1,0 +1,57 @@
+[
+  {
+    "id": "react-server-state-drilling",
+    "kind": "rule",
+    "language": "tsx",
+    "title": "Server state drilled 3+ levels must move to React Query",
+    "guideline": "Data fetched in a useEffect and stored with useState, then passed down 3 or more component levels as props, is server state being hand-carried through the tree. Move the fetch into React Query (useQuery) — or SWR — and read it with the hook in the component that actually uses it. Intermediate components must not know about the data at all.",
+    "metadata": {"framework": "react", "category": "state-management", "tags": ["react", "react-query", "prop-drilling", "server-state"]},
+    "rule": {
+      "id": "react-server-state-drilling",
+      "language": "tsx",
+      "type": "semantic",
+      "check": "react-server-state-drilling",
+      "params": {"max_depth": 3, "fetch_names": ["fetch", "axios"]},
+      "message": "server state must not be prop-drilled; fetch it with React Query where it is used"
+    },
+    "good_example": "// @file: App.tsx\nimport Layout from \"./Layout\";\n\nexport function App() {\n  return <Layout />;\n}\n\n// @file: Layout.tsx\nimport Sidebar from \"./Sidebar\";\n\nexport default function Layout() {\n  return <Sidebar />;\n}\n\n// @file: Sidebar.tsx\nimport UserCard from \"./UserCard\";\n\nconst Sidebar = () => <UserCard />;\nexport default Sidebar;\n\n// @file: UserCard.tsx\nimport { useQuery } from \"@tanstack/react-query\";\n\nexport default function UserCard() {\n  const { data: user } = useQuery({ queryKey: [\"user\"], queryFn: fetchUser });\n  return <div>{user?.name}</div>;\n}\n",
+    "bad_example": "// @file: App.tsx\nimport { useState, useEffect } from \"react\";\nimport Layout from \"./Layout\";\n\nexport function App() {\n  const [user, setUser] = useState(null);\n  useEffect(() => {\n    fetch(\"/api/user\").then((r) => r.json()).then(setUser);\n  }, []);\n  return <Layout user={user} />;\n}\n\n// @file: Layout.tsx\nimport Sidebar from \"./Sidebar\";\n\nexport default function Layout({ user }) {\n  return <Sidebar user={user} />;\n}\n\n// @file: Sidebar.tsx\nimport UserCard from \"./UserCard\";\n\nconst Sidebar = ({ user }) => <UserCard user={user} />;\nexport default Sidebar;\n\n// @file: UserCard.tsx\nexport default function UserCard({ user }) {\n  return <div>{user?.name}</div>;\n}\n"
+  },
+  {
+    "id": "react-shared-mutable-state",
+    "kind": "rule",
+    "language": "tsx",
+    "title": "State mutated from below and shared across branches must use Context",
+    "guideline": "When a useState value AND its setter are handed down as props — the setter so descendants can change it, the value fanning out to 2+ child branches (or the setter drilled 3+ levels) — the intent is a global change: one component updates, distant parts react. That is Context's job (or a store like Zustand). Put the pair in a Provider and read it with useContext where needed.",
+    "metadata": {"framework": "react", "category": "state-management", "tags": ["react", "context", "prop-drilling", "shared-state"]},
+    "rule": {
+      "id": "react-shared-mutable-state",
+      "language": "tsx",
+      "type": "semantic",
+      "check": "react-shared-mutable-state",
+      "params": {"min_branches": 2, "max_setter_depth": 3},
+      "message": "shared mutable state must live in a Context (or store), not travel as value+setter props"
+    },
+    "good_example": "// @file: App.tsx\nimport { useState } from \"react\";\nimport { FilterContext } from \"./filter-context\";\nimport Toolbar from \"./Toolbar\";\nimport Results from \"./Results\";\n\nexport function App() {\n  const [filter, setFilter] = useState(\"\");\n  return (\n    <FilterContext.Provider value={{ filter, setFilter }}>\n      <Toolbar />\n      <Results />\n    </FilterContext.Provider>\n  );\n}\n\n// @file: Toolbar.tsx\nimport { useContext } from \"react\";\nimport { FilterContext } from \"./filter-context\";\n\nexport default function Toolbar() {\n  const { filter, setFilter } = useContext(FilterContext);\n  return <input value={filter} onChange={(e) => setFilter(e.target.value)} />;\n}\n\n// @file: Results.tsx\nimport { useContext } from \"react\";\nimport { FilterContext } from \"./filter-context\";\n\nexport default function Results() {\n  const { filter } = useContext(FilterContext);\n  return <div>{filter}</div>;\n}\n",
+    "bad_example": "// @file: App.tsx\nimport { useState } from \"react\";\nimport Toolbar from \"./Toolbar\";\nimport Results from \"./Results\";\n\nexport function App() {\n  const [filter, setFilter] = useState(\"\");\n  return (\n    <div>\n      <Toolbar filter={filter} onFilter={setFilter} />\n      <Results filter={filter} />\n    </div>\n  );\n}\n\n// @file: Toolbar.tsx\nexport default function Toolbar({ filter, onFilter }) {\n  return <input value={filter} onChange={(e) => onFilter(e.target.value)} />;\n}\n\n// @file: Results.tsx\nexport default function Results({ filter }) {\n  return <div>{filter}</div>;\n}\n"
+  },
+  {
+    "id": "react-prop-drilling",
+    "kind": "rule",
+    "language": "tsx",
+    "title": "No prop drilling deeper than 2 levels",
+    "guideline": "A value passed through 3+ component boundaries, where the intermediates only forward it, couples the whole path to that prop. Restructure: composition (pass the rendered element instead of the data), Context, or a state library — depending on what the value is.",
+    "metadata": {"framework": "react", "category": "state-management", "tags": ["react", "prop-drilling", "composition"]},
+    "rule": {
+      "id": "react-prop-drilling",
+      "language": "tsx",
+      "type": "semantic",
+      "check": "react-prop-drilling",
+      "params": {"max_depth": 3},
+      "message": "prop drilled through 3+ component levels; restructure with composition, Context, or a store",
+      "severity": "warning"
+    },
+    "good_example": "// @file: App.tsx\nimport Layout from \"./Layout\";\n\nexport function App() {\n  const theme = \"dark\";\n  return <Layout theme={theme} />;\n}\n\n// @file: Layout.tsx\nimport Header from \"./Header\";\n\nexport default function Layout({ theme }) {\n  return <Header theme={theme} />;\n}\n\n// @file: Header.tsx\nexport default function Header({ theme }) {\n  return <header className={theme}>hi</header>;\n}\n",
+    "bad_example": "// @file: App.tsx\nimport Layout from \"./Layout\";\n\nexport function App() {\n  const theme = \"dark\";\n  return <Layout theme={theme} />;\n}\n\n// @file: Layout.tsx\nimport Header from \"./Header\";\n\nexport default function Layout({ theme }) {\n  return <Header theme={theme} />;\n}\n\n// @file: Header.tsx\nimport Title from \"./Title\";\n\nexport default function Header({ theme }) {\n  return <Title theme={theme} />;\n}\n\n// @file: Title.tsx\nexport default function Title({ theme }) {\n  return <h1 className={theme}>hi</h1>;\n}\n"
+  }
+]

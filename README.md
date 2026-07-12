@@ -27,8 +27,16 @@ answer:
 ## Key properties
 
 - **Rules are executable, not prose.** A convention is a tree-sitter query
-  (`forbid` / `require` / `require_in` / `naming`). The same code + rule
-  always produces the same verdict, with line/column positions.
+  (`forbid` / `require` / `require_in` / `naming`) or a registered
+  cross-file analyzer (`semantic`). The same code + rule always produces
+  the same verdict, with line/column positions.
+- **Semantic rules judge across files.** Some conventions can't be seen from
+  one place: React prop drilling is only a violation given the *chain* of
+  components AND where the data came from. The `semantic` rule type runs a
+  deterministic project model (components, hook bindings, render edges,
+  prop chains with provenance: server-fetch / local state / setter / query /
+  context) — e.g. "server state drilled 3+ levels → React Query",
+  "value+setter fanning out across branches → Context".
 - **Rules are self-verified on insert.** A rule convention must mechanically
   flag its own `bad_example` and pass its own `good_example`, or the store
   rejects it. You cannot store a convention that can't be demonstrated.
@@ -75,6 +83,8 @@ acode search --language python --code-file some/route.py   # rank by AST shape
 
 # 3. run the pipeline directly from the CLI (observable end to end)
 acode check src/status.ts                     # deterministic verdict, no LLM
+acode check-project ./src                     # cross-file semantic rules too
+                                              # (React prop drilling / state origins)
 acode generate "shipment status lifecycle" --language typescript --verbose
 acode review src/status.ts --verbose          # mechanical verdict + LLM fix
 
@@ -98,6 +108,7 @@ Then from Claude Code (or any MCP client):
 | tool | LLM? | what it does |
 |---|---|---|
 | `check_code` | no | deterministic AST rule verdict with positions |
+| `check_project` | no | whole-directory verdict incl. cross-file semantic rules |
 | `search_conventions` | no | metadata filter + AST-similarity ranking |
 | `list/add/delete_convention` | no | manage rules (self-verified on insert) |
 | `index_codebase` | no | ingest code shapes as retrieval patterns |
@@ -150,6 +161,15 @@ Rule types:
 - `require_in` — for each `scope_query` match, `query` must match inside it
   (e.g. every function has a docstring)
 - `naming` — the `capture`'s text must fullmatch `regex`
+- `semantic` — `check` names a registered cross-file analyzer, `params`
+  tunes its thresholds. Shipped analyzers (see `conventions/react.json`):
+  `react-server-state-drilling` (fetch-in-effect state drilled ≥ `max_depth`
+  levels → use React Query), `react-shared-mutable-state` (useState
+  value+setter fanning out to ≥ `min_branches` branches, or setter drilled
+  ≥ `max_setter_depth` → use Context), `react-prop-drilling` (any value
+  drilled ≥ `max_depth`). Multi-file `good_example` / `bad_example`
+  snippets are written as one string with `// @file: path` marker lines —
+  self-verification on insert works exactly as for query rules.
 
 `kind: "pattern"` entries skip the rule and store a canonical snippet whose
 AST fingerprint steers retrieval (this is what `acode index` produces from

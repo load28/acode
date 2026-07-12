@@ -126,6 +126,31 @@ def build_server(config: AcodeConfig | None = None,
         return json.dumps(report.to_dict(), ensure_ascii=False, indent=2)
 
     @mcp.tool()
+    def check_project(
+        path: str,
+        language: str = "tsx",
+        framework: str | None = None,
+        category: str | None = None,
+        tags: list[str] | None = None,
+        max_files: int = 500,
+    ) -> str:
+        """Mechanically check a whole project directory (or one file)
+        against stored rules, including cross-file semantic rules that a
+        single-file check cannot judge — e.g. React prop-drilling depth
+        with data-origin classification (server state -> React Query,
+        shared mutable state -> Context). Deterministic, no LLM. Violations
+        carry the file, position, and the prop chain path."""
+        files = steps.load_project_files(path, max_files=max_files)
+        if not files:
+            return json.dumps({"error": f"no checkable source files under {path!r}"})
+        rules = steps.project_rules(
+            store, files, language, _metadata_from(framework, category, tags))
+        report = steps.check_project(files, language, rules)
+        out = report.to_dict()
+        out["files_checked"] = sorted(files)
+        return json.dumps(out, ensure_ascii=False, indent=2)
+
+    @mcp.tool()
     async def generate_code(
         language: str,
         task: str,
@@ -183,6 +208,8 @@ def build_server(config: AcodeConfig | None = None,
         regex: str | None = None,
         scope_query: str | None = None,
         severity: str = "error",
+        check: str | None = None,
+        params: dict | None = None,
         good_example: str = "",
         bad_example: str = "",
         framework: str | None = None,
@@ -191,18 +218,25 @@ def build_server(config: AcodeConfig | None = None,
         replace: bool = False,
     ) -> str:
         """Store a convention. kind='rule' needs rule_type
-        (forbid|require|require_in|naming), a tree-sitter query and a message;
-        the rule is validated mechanically on insert (it must flag
-        bad_example and pass good_example). kind='pattern' needs a
-        good_example snippet and is used for AST-similarity retrieval."""
+        (forbid|require|require_in|naming|semantic) and a message; query-based
+        types need a tree-sitter query, rule_type='semantic' needs check=
+        a registered cross-file analyzer name (e.g. react-prop-drilling)
+        plus optional params thresholds — multi-file examples use
+        `// @file: path` marker lines. The rule is validated mechanically on
+        insert (it must flag bad_example and pass good_example).
+        kind='pattern' needs a good_example snippet and is used for
+        AST-similarity retrieval."""
         rule = None
         if kind == "rule":
-            if not (rule_type and query and message):
-                raise ValueError("kind='rule' requires rule_type, query and message")
+            if not (rule_type and message and (query or check)):
+                raise ValueError(
+                    "kind='rule' requires rule_type, a message, and a query "
+                    "(or check= for rule_type='semantic')")
             rule = Rule(
-                id=id, language=language, type=rule_type, query=query,
+                id=id, language=language, type=rule_type, query=query or "",
                 message=message, capture=capture, regex=regex,
                 scope_query=scope_query, severity=severity,
+                check=check, params=params or {},
             )
         conv = Convention(
             id=id, kind=kind, language=language, title=title,
