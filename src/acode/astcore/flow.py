@@ -52,13 +52,16 @@ _JSX_NODE_TYPES = ("jsx_element", "jsx_self_closing_element", "jsx_fragment")
 FUNCTION_NODE_TYPES = ("arrow_function", "function_expression",
                        "function_declaration", "function")
 
-# strongest first: a derived value inherits its strongest source's origin
-_ORIGIN_PRIORITY = ("server-state", "query", "context", "local-state",
-                    "dispatch", "setter", "prop", "local")
+# strongest first: a derived value inherits its strongest source's origin.
+# 'store' (Pinia/Zustand/Jotai/...) sits with 'context': sanctioned global
+# state — exempt from the server-state and shared-mutable rules, still
+# visible to generic drilling (read the store where the value is used).
+_ORIGIN_PRIORITY = ("server-state", "query", "context", "store",
+                    "local-state", "dispatch", "setter", "prop", "local")
 
 # origins a chain may START from ('prop' continues chains, never starts one)
 ORIGIN_KINDS = ("server-state", "local-state", "setter", "dispatch",
-                "query", "context", "local")
+                "query", "context", "store", "local")
 
 
 def priority(origin: str) -> int:
@@ -172,6 +175,7 @@ class HookFacts:
     scope: ComponentFacts
     server_write_params: set[str] = field(default_factory=set)
     returns: dict[str, Any] = field(default_factory=dict)
+    frozen: bool = False  # returns preset (store definitions), never recomputed
 
 
 @dataclass
@@ -182,6 +186,8 @@ class FileFacts:
     components: dict[str, ComponentFacts] = field(default_factory=dict)
     hooks: dict[str, HookFacts] = field(default_factory=dict)
     imports: dict[str, str] = field(default_factory=dict)  # local -> module
+    reexports: dict[str, str] = field(default_factory=dict)  # name -> module
+    star_reexports: list[str] = field(default_factory=list)  # export * from
 
 
 @dataclass
@@ -386,28 +392,7 @@ def pattern_targets(name_node: Node,
     return None, ()
 
 
-def extract_returns_spec(func: Node, body: Node) -> tuple:
-    """Shape of a hook/composable's own (non-nested) return value."""
-    def own_returns(node: Node) -> Iterator[Node]:
-        for child in node.named_children:
-            if child.type in FUNCTION_NODE_TYPES:
-                continue
-            if child.type == "return_statement":
-                yield child
-            else:
-                yield from own_returns(child)
-
-    expr: Node | None = None
-    if body.type != "statement_block":
-        expr = body  # arrow with expression body
-    else:
-        for ret in own_returns(body):
-            candidates = [n for n in ret.named_children
-                          if n.type not in ("comment",)]
-            if candidates:
-                expr = candidates[0]
-    if expr is None:
-        return ("none",)
+def _return_spec_of(expr: Node) -> tuple:
     if expr.type == "parenthesized_expression" and expr.named_children:
         expr = expr.named_children[0]
     if expr.type == "object":
@@ -435,6 +420,43 @@ def extract_returns_spec(func: Node, body: Node) -> tuple:
     return ("none",)
 
 
+def extract_returns_spec(func: Node, body: Node) -> tuple:
+    """Shape of a hook/composable's own (non-nested) return value. Every
+    own return is merged so conditional early returns
+    (`if (loading) return { user: null }`) don't hide keys — for object
+    returns the keys union, with the LAST return winning per key (the
+    final return is the representative state)."""
+    def own_returns(node: Node) -> Iterator[Node]:
+        for child in node.named_children:
+            if child.type in FUNCTION_NODE_TYPES:
+                continue
+            if child.type == "return_statement":
+                yield child
+            else:
+                yield from own_returns(child)
+
+    specs: list[tuple] = []
+    if body.type != "statement_block":
+        specs.append(_return_spec_of(body))  # arrow with expression body
+    else:
+        for ret in own_returns(body):
+            candidates = [n for n in ret.named_children
+                          if n.type not in ("comment",)]
+            if candidates:
+                specs.append(_return_spec_of(candidates[0]))
+    specs = [s for s in specs if s[0] != "none"]
+    if not specs:
+        return ("none",)
+    objects = [s for s in specs if s[0] == "object"]
+    if objects:
+        merged: dict[str, str] = {}
+        for _, entries in objects:
+            for key, ident in entries:
+                merged[key] = ident  # later returns override
+        return ("object", tuple(sorted(merged.items())))
+    return specs[-1]
+
+
 def top_level_functions(root: Node) -> Iterator[tuple[str, Node, Node]]:
     """Yield (name, name_node, function_node) for top-level functions."""
     for node in root.named_children:
@@ -459,6 +481,35 @@ def top_level_functions(root: Node) -> Iterator[tuple[str, Node, Node]]:
                 if name_node.type == "identifier" and value.type in (
                         "arrow_function", "function_expression", "function"):
                     yield text(name_node), name_node, value
+
+
+def extract_reexports(root: Node) -> tuple[dict[str, str], list[str]]:
+    """Barrel exports: `export { X } from './x'` -> {exported_name: module};
+    `export * from './x'` -> star module list."""
+    named: dict[str, str] = {}
+    stars: list[str] = []
+    for node in root.named_children:
+        if node.type != "export_statement":
+            continue
+        source = node.child_by_field_name("source")
+        if source is None:
+            continue  # a plain export, not a re-export
+        frag = next((n for n in source.named_children
+                     if n.type == "string_fragment"), None)
+        module = text(frag) if frag is not None else text(source).strip("'\"")
+        clause = next((n for n in node.named_children
+                       if n.type == "export_clause"), None)
+        if clause is None:
+            stars.append(module)
+            continue
+        for spec in clause.named_children:
+            if spec.type != "export_specifier":
+                continue
+            alias = spec.child_by_field_name("alias")
+            name = alias if alias is not None else spec.child_by_field_name("name")
+            if name is not None:
+                named[text(name)] = module
+    return named, stars
 
 
 def extract_imports(root: Node) -> dict[str, str]:
@@ -521,10 +572,54 @@ def resolve_derived(bindings: dict[str, Binding]) -> None:
 # ------------------------------------------------- hook/composable engine
 
 
+def _files_with_stem(analysis: ProjectAnalysis, module: str) -> list[str]:
+    """Files a module specifier can point to: matching basename ('./Layout',
+    './UserCard.vue') or the directory's index file ('./components' ->
+    components/index.ts — the barrel entry point)."""
+    stem = Path(module).stem
+    out = []
+    for path in sorted(analysis.files):
+        p = Path(path)
+        if p.stem == stem or (p.stem == "index" and p.parent.name == stem):
+            out.append(path)
+    return out
+
+
+def _lookup_in_module(analysis: ProjectAnalysis, module: str, name: str,
+                      registry_attr: str, depth: int,
+                      seen: frozenset[str]) -> Any | None:
+    """Find `name` in the file(s) a module specifier points to, following
+    barrel re-exports (`export {X} from`, `export * from`) a bounded number
+    of hops."""
+    if depth <= 0:
+        return None
+    for path in _files_with_stem(analysis, module):
+        if path in seen:
+            continue
+        facts = analysis.files[path]
+        found = getattr(facts, registry_attr).get(name)
+        if found is not None:
+            return found
+        next_seen = seen | {path}
+        target = facts.reexports.get(name)
+        if target:
+            found = _lookup_in_module(
+                analysis, target, name, registry_attr, depth - 1, next_seen)
+            if found is not None:
+                return found
+        for star in facts.star_reexports:
+            found = _lookup_in_module(
+                analysis, star, name, registry_attr, depth - 1, next_seen)
+            if found is not None:
+                return found
+    return None
+
+
 def resolve_named(analysis: ProjectAnalysis, from_file: str, name: str,
                   registry_attr: str) -> Any | None:
-    """Same-file first, then the import's module basename, then a global
-    (sorted-first) name match. Works for components and hooks alike."""
+    """Same-file first, then the import's module basename (following barrel
+    re-exports up to 3 hops), then a global (sorted-first) name match.
+    Works for components and hooks alike."""
     file_facts = analysis.files.get(from_file)
     if file_facts is not None:
         local = getattr(file_facts, registry_attr).get(name)
@@ -532,12 +627,10 @@ def resolve_named(analysis: ProjectAnalysis, from_file: str, name: str,
             return local
         module = file_facts.imports.get(name)
         if module:
-            stem = Path(module).stem  # './Layout' and './UserCard.vue' alike
-            for path in sorted(analysis.files):
-                if Path(path).stem == stem:
-                    found = getattr(analysis.files[path], registry_attr).get(name)
-                    if found is not None:
-                        return found
+            found = _lookup_in_module(
+                analysis, module, name, registry_attr, 3, frozenset())
+            if found is not None:
+                return found
     registry = getattr(analysis, registry_attr)
     return registry.get(name)
 
@@ -657,6 +750,8 @@ def resolve_hooks(analysis: ProjectAnalysis, apply_call: ApplyHookCall,
     for _ in range(len(hooks) + 2):
         changed = False
         for hook in hooks:
+            if hook.frozen:
+                continue  # store definitions: returns preset, nothing inside
             before = _snapshot(hook)
             for call in hook.scope.hook_calls:
                 callee = resolve_named(analysis, hook.file, call.hook, "hooks")

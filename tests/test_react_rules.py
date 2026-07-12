@@ -727,6 +727,133 @@ function App() {
         assert analysis.components["App"].bindings["user"].origin == "local"
 
 
+# -------------------------------------------- wrappers, stores, barrels
+
+
+class TestGapClosing:
+    def test_memo_wrapped_component_detected(self):
+        analysis = analyze_project({"App.tsx": """
+import { memo } from "react";
+function App() {
+  const [v, setV] = useState(1);
+  return <Card v={v} />;
+}
+const Card = memo(({ v }) => <Leaf v={v} />);
+const Leaf = ({ v }) => <i>{v}</i>;
+"""})
+        assert "Card" in analysis.components
+        chain = max((c for c in analysis.chains if c.source == "v"),
+                    key=lambda c: c.depth)
+        assert chain.depth == 2  # through the memo boundary
+
+    def test_memo_forward_ref_nested(self):
+        facts = extract_file_facts("X.tsx",
+            "const Input = React.memo(forwardRef((props, ref) => "
+            "<Inner v={props.v} />));\n")
+        assert "Input" in facts.components
+        assert facts.components["Input"].passes[0].source == "v"
+
+    def test_zustand_store_hook(self):
+        analysis = analyze_project({"App.tsx": """
+import { create } from "zustand";
+const useCart = create((set) => ({ items: [], add: () => set({}) }));
+function App() {
+  const items = useCart((s) => s.items);
+  return <List items={items} />;
+}
+const List = ({ items }) => <ul>{items}</ul>;
+"""})
+        assert analysis.components["App"].bindings["items"].origin == "store"
+
+    def test_jotai_and_redux_hooks_are_store(self):
+        facts = extract_file_facts("X.tsx", """
+function C() {
+  const [count, setCount] = useAtom(countAtom);
+  const name = useAtomValue(nameAtom);
+  const cart = useSelector((s) => s.cart);
+  return <div>{count}{name}{cart}</div>;
+}
+""")
+        bindings = facts.components["C"].bindings
+        assert bindings["count"].origin == "store"
+        assert bindings["setCount"].origin == "store"
+        assert bindings["name"].origin == "store"
+        assert bindings["cart"].origin == "store"
+
+    def test_store_values_exempt_from_server_rule_but_not_drilling(self):
+        analysis = analyze_project({"App.tsx": """
+function App() {
+  const items = useCart((s) => s.items);
+  return <A items={items} />;
+}
+const useCart = create(() => ({ items: [] }));
+const A = ({ items }) => <B items={items} />;
+const B = ({ items }) => <C items={items} />;
+const C = ({ items }) => <ul>{items}</ul>;
+"""})
+        assert run_semantic_check(
+            "react-server-state-drilling", analysis, {"max_depth": 3}) == []
+        drilling = run_semantic_check(
+            "react-prop-drilling", analysis, {"max_depth": 3})
+        assert len(drilling) == 1 and "(store)" in drilling[0].detail
+
+    def test_barrel_named_reexport_resolves(self):
+        analysis = analyze_project({
+            "App.tsx": """
+import { UserCard } from "./components";
+function App() {
+  const [u, setU] = useState(null);
+  useEffect(() => { fetch("/u").then(setU); }, []);
+  return <UserCard u={u} />;
+}
+""",
+            "components/index.tsx": "export { UserCard } from \"./UserCard\";\n",
+            "components/UserCard.tsx": """
+import { Inner } from "./Inner";
+export const UserCard = ({ u }) => <Inner u={u} />;
+""",
+            "components/Inner.tsx": "export const Inner = ({ u }) => <b>{u}</b>;\n",
+        })
+        chain = max((c for c in analysis.chains if c.source == "u"),
+                    key=lambda c: c.depth)
+        assert chain.depth == 2  # barrel followed: App -> UserCard -> Inner
+
+    def test_barrel_star_reexport_resolves(self):
+        analysis = analyze_project({
+            "App.tsx": """
+import { Panel } from "./ui";
+function App() {
+  const [v, setV] = useState(1);
+  return <Panel v={v} />;
+}
+""",
+            "ui/index.ts": "export * from \"./Panel\";\n",
+            "ui/Panel.tsx": "export const Panel = ({ v }) => <Sub v={v} />;\nconst Sub = ({ v }) => <i>{v}</i>;\n",
+        })
+        chain = max((c for c in analysis.chains if c.source == "v"),
+                    key=lambda c: c.depth)
+        assert chain.depth == 2
+
+    def test_hook_conditional_returns_merged(self):
+        analysis = analyze_project({"App.tsx": """
+function useUser() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => { fetch("/u").then(setUser); }, []);
+  if (loading) {
+    return { user: null, loading };
+  }
+  return { user, loading };
+}
+function App() {
+  const { user } = useUser();
+  return <div>{user}</div>;
+}
+"""})
+        # the last return's `user` (server-state) wins over the early null
+        assert analysis.components["App"].bindings["user"].origin == "server-state"
+
+
 # ------------------------------------------------------- engine integration
 
 

@@ -36,6 +36,25 @@
     "bad_example": "// @file: App.vue\n<script setup>\nimport { ref } from \"vue\";\nimport Toolbar from \"./Toolbar.vue\";\nimport Results from \"./Results.vue\";\nconst filter = ref(\"\");\n</script>\n<template>\n  <div>\n    <Toolbar v-model=\"filter\" />\n    <Results :filter=\"filter\" />\n  </div>\n</template>\n\n// @file: Toolbar.vue\n<script setup>\ndefineProps([\"modelValue\"]);\ndefineEmits([\"update:modelValue\"]);\n</script>\n<template>\n  <input :value=\"modelValue\" @input=\"$emit('update:modelValue', $event.target.value)\" />\n</template>\n\n// @file: Results.vue\n<script setup>\ndefineProps([\"filter\"]);\n</script>\n<template>\n  <div>{{ filter }}</div>\n</template>\n"
   },
   {
+    "id": "vue-emit-relay",
+    "kind": "rule",
+    "language": "vue",
+    "title": "No event relayed upward through 2+ component levels",
+    "guideline": "A child event re-emitted verbatim at each level (`@save=\"$emit('save', $event)\"`) is the upward mirror of prop drilling: every intermediate is coupled to an event it doesn't handle. Put v-model at the level that owns the state, provide a callback via provide/inject, or move the state to a Pinia store so the deep component mutates it directly.",
+    "metadata": {"framework": "vue", "category": "state-management", "tags": ["vue", "emit", "prop-drilling", "events"]},
+    "rule": {
+      "id": "vue-emit-relay",
+      "language": "vue",
+      "type": "semantic",
+      "check": "vue-emit-relay",
+      "params": {"max_depth": 2},
+      "message": "event relayed through 2+ levels; own the state at the right level (v-model there, provide/inject, or a store)",
+      "severity": "warning"
+    },
+    "good_example": "// @file: App.vue\n<script setup>\nimport { ref } from \"vue\";\nimport Mid from \"./Mid.vue\";\nconst v = ref(\"\");\n</script>\n<template>\n  <Mid @save=\"v = $event\" />\n</template>\n\n// @file: Mid.vue\n<script setup>\nimport Leaf from \"./Leaf.vue\";\n</script>\n<template>\n  <Leaf @save=\"$emit('save', $event)\" />\n</template>\n\n// @file: Leaf.vue\n<script setup>\n</script>\n<template>\n  <button @click=\"$emit('save', 1)\">save</button>\n</template>\n",
+    "bad_example": "// @file: App.vue\n<script setup>\nimport { ref } from \"vue\";\nimport Top from \"./Top.vue\";\nconst v = ref(\"\");\n</script>\n<template>\n  <Top @save=\"v = $event\" />\n</template>\n\n// @file: Top.vue\n<script setup>\nimport Mid from \"./Mid.vue\";\n</script>\n<template>\n  <Mid @save=\"$emit('save', $event)\" />\n</template>\n\n// @file: Mid.vue\n<script setup>\nimport Leaf from \"./Leaf.vue\";\n</script>\n<template>\n  <Leaf @save=\"$emit('save', $event)\" />\n</template>\n\n// @file: Leaf.vue\n<script setup>\n</script>\n<template>\n  <button @click=\"$emit('save', 1)\">save</button>\n</template>\n"
+  },
+  {
     "id": "vue-prop-drilling",
     "kind": "rule",
     "language": "vue",

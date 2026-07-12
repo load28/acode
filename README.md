@@ -47,6 +47,13 @@ answer:
   onMounted+fetch, composables, v-model/@event mutation edges,
   provide/inject) in `vue.py`. Structural single-file rules (e.g.
   ts-no-var) also run inside `.vue` script blocks with file-accurate lines.
+  Provenance knows sanctioned stores (Pinia `defineStore`, Zustand
+  `create`, Jotai atoms, `useSelector` — origin `store`, exempt from the
+  server-state rule, still visible to generic drilling), follows barrel
+  re-exports and `memo`/`forwardRef` wrappers, merges conditional hook
+  returns, and reads Vue's Options API (`data`/`computed`/`methods`/
+  lifecycle with `this.x` tracking). `vue-emit-relay` flags the upward
+  mirror of prop drilling: an event `$emit`-relayed through 2+ levels.
 - **Rules are self-verified on insert.** A rule convention must mechanically
   flag its own `bad_example` and pass its own `good_example`, or the store
   rejects it. You cannot store a convention that can't be demonstrated.

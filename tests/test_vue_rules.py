@@ -456,6 +456,295 @@ useLoad(data);
         assert analysis.components["App"].bindings["data"].origin == "server-state"
 
 
+# ------------------------------------- stores, defineModel, options, emits
+
+
+class TestVueGapClosing:
+    def test_define_model_default_and_named(self):
+        facts = extract_vue_file_facts("X.vue", """
+<script setup>
+const title = defineModel();
+const size = defineModel("size");
+</script>
+<template><div>{{ title }}{{ size }}</div></template>
+""")
+        comp = facts.components["X"]
+        assert "modelValue" in comp.props and "size" in comp.props
+        assert comp.bindings["title"].origin == "prop"
+        assert comp.bindings["title"].prop_roots == ("modelValue",)
+
+    def test_pinia_option_store(self):
+        analysis = analyze_project({
+            "stores.ts": """
+import { defineStore } from "pinia";
+export const useUserStore = defineStore("user", {
+  state: () => ({ user: null, count: 1 }),
+  getters: { double() { return this.count * 2; } },
+});
+""",
+            "App.vue": """
+<script setup>
+import { useUserStore } from "./stores";
+const store = useUserStore();
+</script>
+<template><div>{{ store.user }}</div></template>
+""",
+        })
+        assert analysis.components["App"].bindings["store"].origin == "store"
+
+    def test_pinia_setup_store_keys(self):
+        analysis = analyze_project({
+            "stores.ts": """
+export const useCartStore = defineStore("cart", () => {
+  const items = ref([]);
+  return { items };
+});
+""",
+            "App.vue": """
+<script setup>
+import { useCartStore } from "./stores";
+const { items } = useCartStore();
+</script>
+<template><div>{{ items }}</div></template>
+""",
+        })
+        assert analysis.components["App"].bindings["items"].origin == "store"
+
+    def test_unresolved_store_hook_heuristic(self):
+        analysis = analyze_project({"App.vue": """
+<script setup>
+import { useAuthStore } from "some-package";
+const auth = useAuthStore();
+</script>
+<template><div>{{ auth }}</div></template>
+"""})
+        assert analysis.components["App"].bindings["auth"].origin == "store"
+
+    def test_store_to_refs_inherits_store(self):
+        analysis = analyze_project({"App.vue": """
+<script setup>
+import { storeToRefs } from "pinia";
+const store = useCartStore();
+const { items } = storeToRefs(store);
+</script>
+<template><div>{{ items }}</div></template>
+"""})
+        assert analysis.components["App"].bindings["items"].origin == "store"
+
+    def test_inline_store_to_refs_call(self):
+        analysis = analyze_project({"App.vue": """
+<script setup>
+import { storeToRefs } from "pinia";
+const { items } = storeToRefs(useCartStore());
+</script>
+<template><div>{{ items }}</div></template>
+"""})
+        assert analysis.components["App"].bindings["items"].origin == "store"
+
+    def test_store_value_exempt_from_server_rule_but_drills(self):
+        files = {
+            "App.vue": """
+<script setup>
+import Layout from "./Layout.vue";
+const { items } = useCartStore();
+</script>
+<template><Layout :items="items" /></template>
+""",
+            "Layout.vue": "<script setup>import Mid from './Mid.vue';\ndefineProps(['items']);</script>\n<template><Mid :items=\"items\" /></template>\n",
+            "Mid.vue": "<script setup>import Leaf from './Leaf.vue';\ndefineProps(['items']);</script>\n<template><Leaf :items=\"items\" /></template>\n",
+            "Leaf.vue": "<script setup>defineProps(['items']);</script>\n<template><div>{{ items }}</div></template>\n",
+        }
+        analysis = analyze_project(files)
+        assert run_semantic_check(
+            "vue-server-state-drilling", analysis, {"max_depth": 3}) == []
+        drilling = run_semantic_check(
+            "vue-prop-drilling", analysis, {"max_depth": 3})
+        assert len(drilling) == 1 and "(store)" in drilling[0].detail
+
+    def test_emit_relay_two_levels_fires(self):
+        analysis = analyze_project({
+            "App.vue": """
+<script setup>
+import { ref } from "vue";
+import Top from "./Top.vue";
+const v = ref("");
+</script>
+<template><Top @save="v = $event" /></template>
+""",
+            "Top.vue": """
+<script setup>
+import Mid from "./Mid.vue";
+</script>
+<template><Mid @save="$emit('save', $event)" /></template>
+""",
+            "Mid.vue": """
+<script setup>
+import Leaf from "./Leaf.vue";
+</script>
+<template><Leaf @save="$emit('save', $event)" /></template>
+""",
+            "Leaf.vue": """
+<script setup>
+</script>
+<template><button @click="$emit('save', 1)">go</button></template>
+""",
+        })
+        findings = run_semantic_check(
+            "vue-emit-relay", analysis, {"max_depth": 2})
+        assert len(findings) == 1
+        assert findings[0].file == "Leaf.vue"
+        assert "Leaf =(save)=> Mid =(save)=> Top" in findings[0].detail
+
+    def test_emit_relay_one_level_is_quiet(self):
+        analysis = analyze_project({
+            "App.vue": "<script setup>import Mid from './Mid.vue';</script>\n<template><Mid @save=\"onSave\" /></template>\n",
+            "Mid.vue": "<script setup>import Leaf from './Leaf.vue';</script>\n<template><Leaf @save=\"$emit('save', $event)\" /></template>\n",
+            "Leaf.vue": "<script setup></script>\n<template><button @click=\"$emit('save', 1)\" /></template>\n",
+        })
+        assert run_semantic_check(
+            "vue-emit-relay", analysis, {"max_depth": 2}) == []
+
+    def test_emit_relay_via_script_function(self):
+        analysis = analyze_project({
+            "Top.vue": """
+<script setup>
+import Mid from "./Mid.vue";
+const emit = defineEmits(["saved"]);
+function relay(v) { emit("saved", v); }
+</script>
+<template><Mid @save="relay" /></template>
+""",
+            "Mid.vue": """
+<script setup>
+import Leaf from "./Leaf.vue";
+</script>
+<template><Leaf @save="$emit('save', $event)" /></template>
+""",
+            "Leaf.vue": """
+<script setup>
+const emit = defineEmits(["save"]);
+function fire() { emit("save", 1); }
+</script>
+<template><button @click="fire" /></template>
+""",
+        })
+        findings = run_semantic_check(
+            "vue-emit-relay", analysis, {"max_depth": 2})
+        assert len(findings) == 1
+        assert "Leaf =(save)=> Mid =(saved)=> Top" in findings[0].detail
+
+    def test_options_api_props_data_and_fetch(self):
+        analysis = analyze_project({
+            "App.vue": """
+<script>
+export default {
+  data() {
+    return { rows: [] };
+  },
+  mounted() {
+    fetch("/api").then((r) => r.json()).then((d) => { this.rows = d; });
+  },
+};
+</script>
+<template><Layout :rows="rows" /></template>
+""",
+            "Layout.vue": """
+<script>
+export default { props: ["rows"] };
+</script>
+<template><Mid :rows="rows" /></template>
+""",
+            "Mid.vue": "<script>export default { props: [\"rows\"] };</script>\n<template><Leaf :rows=\"rows\" /></template>\n",
+            "Leaf.vue": "<script>export default { props: [\"rows\"] };</script>\n<template><div>{{ rows }}</div></template>\n",
+        })
+        app = analysis.components["App"]
+        assert app.bindings["rows"].origin == "server-state"
+        findings = run_semantic_check(
+            "vue-server-state-drilling", analysis, {"max_depth": 3})
+        assert len(findings) == 1
+
+    def test_options_api_computed_and_methods(self):
+        analysis = analyze_project({
+            "App.vue": """
+<script>
+import Editor from "./Editor.vue";
+import View from "./View.vue";
+export default {
+  data() {
+    return { note: "" };
+  },
+  computed: { shout() { return this.note + "!"; } },
+  methods: { onChange(v) { this.note = v; } },
+};
+</script>
+<template>
+  <div>
+    <Editor :note="note" @change="onChange" />
+    <View :caption="shout" />
+  </div>
+</template>
+""",
+            "Editor.vue": "<script>export default { props: [\"note\"] };</script>\n<template><textarea /></template>\n",
+            "View.vue": "<script>export default { props: [\"caption\"] };</script>\n<template><p>{{ caption }}</p></template>\n",
+        })
+        app = analysis.components["App"]
+        assert app.bindings["shout"].origin == "local-state"  # derived from note
+        findings = run_semantic_check(
+            "vue-shared-mutable-state", analysis, {"min_branches": 2})
+        assert len(findings) == 1  # Editor mutates via method, View reads shout
+
+    def test_define_component_wrapper(self):
+        facts = extract_vue_file_facts("X.vue", """
+<script>
+export default defineComponent({
+  props: ["title"],
+});
+</script>
+<template><h1>{{ title }}</h1></template>
+""")
+        assert facts.components["X"].props == ["title"]
+
+    def test_vue_barrel_reexport(self):
+        analysis = analyze_project({
+            "App.vue": """
+<script setup>
+import { ref } from "vue";
+import { UserCard } from "./components";
+const v = ref(1);
+</script>
+<template><UserCard :v="v" /></template>
+""",
+            "components/index.ts": "export { UserCard } from \"./UserCard.vue\";\n",
+            "components/UserCard.vue": "<script setup>import Inner from './Inner.vue';\ndefineProps(['v']);</script>\n<template><Inner :v=\"v\" /></template>\n",
+            "components/Inner.vue": "<script setup>defineProps(['v']);</script>\n<template><b>{{ v }}</b></template>\n",
+        })
+        chain = max((c for c in analysis.chains if c.source == "v"),
+                    key=lambda c: c.depth)
+        assert chain.depth == 2
+
+    def test_composable_conditional_returns_merged(self):
+        analysis = analyze_project({"App.vue": """
+<script setup>
+import { ref, onMounted } from "vue";
+
+function useUser() {
+  const user = ref(null);
+  const loading = ref(true);
+  onMounted(() => {
+    fetch("/u").then((r) => r.json()).then((d) => { user.value = d; });
+  });
+  if (window.__test) {
+    return { loading };
+  }
+  return { user, loading };
+}
+const { user } = useUser();
+</script>
+<template><div>{{ user }}</div></template>
+"""})
+        assert analysis.components["App"].bindings["user"].origin == "server-state"
+
+
 # --------------------------------------------------- engine + store + CLI
 
 
@@ -504,7 +793,8 @@ class TestVueIntegration:
     def test_seed_conventions_self_verify(self, store):
         added = store.import_file(VUE_JSON)
         assert added == ["vue-server-state-drilling",
-                         "vue-shared-mutable-state", "vue-prop-drilling"]
+                         "vue-shared-mutable-state", "vue-emit-relay",
+                         "vue-prop-drilling"]
 
     def test_cli_check_project(self, tmp_path, capsys):
         from acode.cli import main

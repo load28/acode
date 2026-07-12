@@ -30,6 +30,7 @@ from .flow import (
     ComponentFacts,
     CUSTOM_HOOK_NAME,
     DEFAULT_FETCH_NAMES,
+    FUNCTION_NODE_TYPES,
     FileFacts,
     HookCall,
     HookFacts,
@@ -45,6 +46,7 @@ from .flow import (
     deepest_per_origin,
     expr_candidates,
     extract_imports,
+    extract_reexports,
     extract_returns_spec,
     function_body,
     note_prop,
@@ -76,6 +78,11 @@ _HOOK_ORIGINS = {
     "useInfiniteQuery": "query",
     "useSWR": "query",
     "useContext": "context",
+    # sanctioned global stores read via library hooks
+    "useAtomValue": "store",  # jotai
+    "useSetAtom": "store",
+    "useSelector": "store",  # react-redux
+    "useStore": "store",
 }
 
 # built-in hooks that are NOT treated as user-defined custom hooks
@@ -83,7 +90,14 @@ _BUILTIN_HOOKS = {
     "useState", "useReducer", "useEffect", "useLayoutEffect", "useMemo",
     "useCallback", "useRef", "useId", "useTransition", "useDeferredValue",
     "useImperativeHandle", "useSyncExternalStore", "useDebugValue",
+    "useAtom",
 } | set(_HOOK_ORIGINS)
+
+# zustand-style store factories: `const useCart = create(...)` defines a
+# hook whose every read is store state
+_STORE_FACTORY_FNS = {"create", "createStore", "createWithEqualityFn"}
+
+_WRAPPER_FNS = {"memo", "forwardRef"}
 
 _JSX_NODE_TYPES = ("jsx_element", "jsx_self_closing_element", "jsx_fragment")
 
@@ -204,6 +218,13 @@ def _extract_bindings(body: Node, comp: ComponentFacts,
         hook = text(callee) if callee is not None \
             and callee.type == "identifier" else ""
 
+        if hook == "useAtom" and name_node.type == "array_pattern":
+            # jotai: both the value and the setter are store state
+            _, targets = pattern_targets(name_node)
+            for _key, local in targets:
+                comp.bindings[local] = Binding(local, "store", line, col)
+            comp.hooks.add(hook)
+            continue
         if hook in ("useState", "useReducer") and name_node.type == "array_pattern":
             idents = [n for n in name_node.named_children if n.type == "identifier"]
             value_name = text(idents[0]) if idents else None
@@ -328,6 +349,52 @@ def _extract_passes(body: Node, comp: ComponentFacts) -> None:
                         spread=True))
 
 
+def _unwrap_component_wrapper(value: Node) -> Node | None:
+    """The component function inside `memo(fn)`, `forwardRef(fn)`,
+    `React.memo(forwardRef(fn))`, ... — None if it isn't that shape."""
+    while value.type == "call_expression":
+        fn = value.child_by_field_name("function")
+        if fn is None:
+            return None
+        root, member_path = root_identifier(fn)
+        callee = member_path[-1] if member_path else root
+        if callee not in _WRAPPER_FNS:
+            return None
+        args = value.child_by_field_name("arguments")
+        inner = next(
+            (a for a in (args.named_children if args is not None else [])
+             if a.type in FUNCTION_NODE_TYPES or a.type == "call_expression"),
+            None)
+        if inner is None:
+            return None
+        value = inner
+    return value if value.type in FUNCTION_NODE_TYPES else None
+
+
+def _wrapped_and_store_declarators(root: Node):
+    """Top-level `const X = memo(...)` components and
+    `const useX = create(...)` zustand stores."""
+    for node in root.named_children:
+        target = node
+        if node.type == "export_statement":
+            decl = node.child_by_field_name("declaration")
+            if decl is None:
+                continue
+            target = decl
+        if target.type != "lexical_declaration":
+            continue
+        for decl in target.named_children:
+            if decl.type != "variable_declarator":
+                continue
+            name_node = decl.child_by_field_name("name")
+            value = decl.child_by_field_name("value")
+            if name_node is None or value is None \
+                    or name_node.type != "identifier" \
+                    or value.type != "call_expression":
+                continue
+            yield text(name_node), name_node, value
+
+
 def extract_file_facts(path: str, code: str, language: str | None = None,
                        fetch_names: tuple[str, ...] = DEFAULT_FETCH_NAMES,
                        ) -> FileFacts:
@@ -338,6 +405,29 @@ def extract_file_facts(path: str, code: str, language: str | None = None,
     facts = FileFacts(path=path, language=lang,
                       syntax_ok=not tree.root_node.has_error)
     facts.imports = extract_imports(tree.root_node)
+    facts.reexports, facts.star_reexports = extract_reexports(tree.root_node)
+
+    for name, name_node, value in _wrapped_and_store_declarators(tree.root_node):
+        line, col = name_node.start_point[0] + 1, name_node.start_point[1]
+        callee = call_callee_root(value)
+        if callee in _STORE_FACTORY_FNS and CUSTOM_HOOK_NAME.match(name):
+            scope = ComponentFacts(name=name, file=path, line=line, col=col)
+            facts.hooks[name] = HookFacts(
+                name=name, file=path, line=line, scope=scope, frozen=True,
+                returns={"kind": "single", "origin": "store"})
+            continue
+        func = _unwrap_component_wrapper(value)
+        if func is None or not name[:1].isupper():
+            continue
+        body = function_body(func) or func
+        if not _contains_jsx(body):
+            continue
+        comp = ComponentFacts(name=name, file=path, line=line, col=col)
+        _extract_props(func, comp)
+        _extract_bindings(body, comp, fetch_names)
+        _extract_passes(body, comp)
+        facts.components[name] = comp
+
     for name, name_node, func in top_level_functions(tree.root_node):
         body = function_body(func) or func
         line, col = name_node.start_point[0] + 1, name_node.start_point[1]

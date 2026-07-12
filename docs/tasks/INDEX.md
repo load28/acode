@@ -4,7 +4,7 @@
 > 규칙: [/CLAUDE.md](../../CLAUDE.md) · 새 태스크: [TEMPLATE.md](TEMPLATE.md) 복사
 > 상태: `todo` 착수 전 · `in_progress` 진행 중 · `blocked` 대기(문서에 사유) · `done` 완료+검증
 
-**마지막 태스크 번호: 0009** (새 태스크는 0010부터)
+**마지막 태스크 번호: 0010** (새 태스크는 0011부터)
 
 | ID | 제목 | 상태 | 시작 | 완료 | 주요 파일 |
 |---|---|---|---|---|---|
@@ -17,6 +17,7 @@
 | [TASK-0007](TASK-0007-react-cross-context-rules.md) | React 크로스 컨텍스트 시맨틱 룰 — prop drilling 깊이 + 상태 출처(서버 fetch→React Query, 공유 mutable→Context) 기계 판정 | done | 2026-07-12 | 2026-07-12 | `src/acode/astcore/react.py`, `src/acode/astcore/rules.py`, `conventions/react.json`, `src/acode/agent/steps.py`, `src/acode/mcpserver/server.py`, `src/acode/cli.py`, `tests/test_react_rules.py` |
 | [TASK-0008](TASK-0008-react-derived-and-custom-hooks.md) | React 분석기 확장 — 변형(파생 값) 출처 상속 + 커스텀 훅 투과(리턴 매핑, 훅→훅, setter 인자 승격) | done | 2026-07-12 | 2026-07-12 | `src/acode/astcore/react.py`, `tests/test_react_rules.py`, `README.md` |
 | [TASK-0009](TASK-0009-vue3-semantic-rules.md) | Vue 3 시맨틱 룰 — 중립 코어(flow.py) 추출 후 Vue 전용 프런트엔드(SFC/템플릿/컴포저블/v-model 변이) + 시드 3종 | done | 2026-07-12 | 2026-07-12 | `src/acode/astcore/flow.py`, `src/acode/astcore/vue.py`, `src/acode/astcore/react.py`, `src/acode/astcore/parser.py`, `src/acode/astcore/rules.py`, `conventions/vue.json`, `tests/test_vue_rules.py` |
+| [TASK-0010](TASK-0010-analyzer-gap-closing.md) | 분석기 한계 극복 — store 출처(Pinia/Zustand/Jotai), Options API, emit 릴레이 룰, 조건부 리턴 병합, barrel/memo/forwardRef | done | 2026-07-12 | 2026-07-12 | `src/acode/astcore/flow.py`, `src/acode/astcore/react.py`, `src/acode/astcore/vue.py`, `conventions/vue.json`, `tests/test_react_rules.py`, `tests/test_vue_rules.py` |
 
 ## 열린 태스크 (todo / in_progress / blocked)
 
@@ -27,5 +28,5 @@
 - ADK 신규 `Workflow`(그래프) API 마이그레이션 — SequentialAgent/LoopAgent deprecation 해소
 - 언어/프레임워크별 시드 컨벤션 확충 (Go, Java, Rust, NestJS, Spring 등 — 문법 휠은 준비됨)
 - 대규모 코퍼스(수만 건) 대비: BM25 증분 색인 또는 SQLite FTS5 전환
-- React 시맨틱 분석기 확장 (TASK-0007 핸드오프): barrel re-export 해석,
-  `React.memo`/`forwardRef` 래핑 인식, Zustand/Jotai 출처 분류, import alias
+- tsconfig paths 별칭의 정확 해석 (현재 stem 매칭 폴백으로 대부분 커버 —
+  TASK-0010 핸드오프)
