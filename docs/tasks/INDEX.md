@@ -4,7 +4,7 @@
 > 규칙: [/CLAUDE.md](../../CLAUDE.md) · 새 태스크: [TEMPLATE.md](TEMPLATE.md) 복사
 > 상태: `todo` 착수 전 · `in_progress` 진행 중 · `blocked` 대기(문서에 사유) · `done` 완료+검증
 
-**마지막 태스크 번호: 0008** (새 태스크는 0009부터)
+**마지막 태스크 번호: 0009** (새 태스크는 0010부터)
 
 | ID | 제목 | 상태 | 시작 | 완료 | 주요 파일 |
 |---|---|---|---|---|---|
@@ -16,6 +16,7 @@
 | [TASK-0006](TASK-0006-ts-ruleset-pipeline-trace.md) | TS 룰셋 확충 (enum→as const 등) + 파이프라인 트레이스 로깅 + E2E | done | 2026-07-12 | 2026-07-12 | `conventions/typescript.json`, `src/acode/agent/pipeline.py`, `src/acode/cli.py`, `tests/test_ts_conventions.py` |
 | [TASK-0007](TASK-0007-react-cross-context-rules.md) | React 크로스 컨텍스트 시맨틱 룰 — prop drilling 깊이 + 상태 출처(서버 fetch→React Query, 공유 mutable→Context) 기계 판정 | done | 2026-07-12 | 2026-07-12 | `src/acode/astcore/react.py`, `src/acode/astcore/rules.py`, `conventions/react.json`, `src/acode/agent/steps.py`, `src/acode/mcpserver/server.py`, `src/acode/cli.py`, `tests/test_react_rules.py` |
 | [TASK-0008](TASK-0008-react-derived-and-custom-hooks.md) | React 분석기 확장 — 변형(파생 값) 출처 상속 + 커스텀 훅 투과(리턴 매핑, 훅→훅, setter 인자 승격) | done | 2026-07-12 | 2026-07-12 | `src/acode/astcore/react.py`, `tests/test_react_rules.py`, `README.md` |
+| [TASK-0009](TASK-0009-vue3-semantic-rules.md) | Vue 3 시맨틱 룰 — 중립 코어(flow.py) 추출 후 Vue 전용 프런트엔드(SFC/템플릿/컴포저블/v-model 변이) + 시드 3종 | done | 2026-07-12 | 2026-07-12 | `src/acode/astcore/flow.py`, `src/acode/astcore/vue.py`, `src/acode/astcore/react.py`, `src/acode/astcore/parser.py`, `src/acode/astcore/rules.py`, `conventions/vue.json`, `tests/test_vue_rules.py` |
 
 ## 열린 태스크 (todo / in_progress / blocked)
 

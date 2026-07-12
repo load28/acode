@@ -323,11 +323,11 @@ export default function Tree({ node }) {
 
 class TestSemanticChecks:
     def test_registry(self):
-        assert semantic_check_names() == [
+        assert {
             "react-prop-drilling",
             "react-server-state-drilling",
             "react-shared-mutable-state",
-        ]
+        } <= set(semantic_check_names())
         with pytest.raises(KeyError):
             run_semantic_check("nope", analyze_project({}), {})
 

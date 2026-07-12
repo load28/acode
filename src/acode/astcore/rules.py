@@ -147,11 +147,15 @@ def _compile(language: str, query: str) -> Query:
 
 # tsx is a superset grammar: structural typescript rules also apply to .tsx
 # code (their queries are recompiled under the tsx grammar; the rare query
-# that doesn't compile there is skipped for that file, not failed). naming
-# rules do NOT transfer — naming idioms differ across the boundary (React
-# components are PascalCase functions, which a plain-typescript camelCase
-# rule would flag).
-_COMPATIBLE_RULE_LANGUAGES = {"tsx": ("tsx", "typescript")}
+# that doesn't compile there is skipped for that file, not failed). The vue
+# pseudo-language parses the SFC's <script> block with the typescript
+# grammar, so the same transfer applies. naming rules do NOT transfer —
+# naming idioms differ across the boundary (React components are PascalCase
+# functions, which a plain-typescript camelCase rule would flag).
+_COMPATIBLE_RULE_LANGUAGES = {
+    "tsx": ("tsx", "typescript"),
+    "vue": ("vue", "typescript"),
+}
 
 
 def _rule_applies(rule: "Rule", code_language: str) -> bool:
@@ -167,16 +171,53 @@ def compatible_rule_languages(code_language: str) -> tuple[str, ...]:
     return _COMPATIBLE_RULE_LANGUAGES.get(code_language, (code_language,))
 
 
+def _semantic_languages() -> tuple[str, ...]:
+    """Languages semantic rules exist for. Importing the framework
+    front-ends also populates the shared check registry."""
+    from .react import REACT_LANGUAGES
+    from .vue import VUE_LANGUAGES
+
+    return REACT_LANGUAGES + VUE_LANGUAGES
+
+
+def _semantic_analyze_source(code: str, language: str):
+    """Dispatch a single-string analysis to the right framework front-end."""
+    if language == "vue":
+        from .vue import analyze_source
+    else:
+        from .react import analyze_source
+    return analyze_source(code, language)
+
+
+def _semantic_analyze_project(files: dict[str, str], language: str):
+    """Dispatch a whole-project analysis, giving each front-end only the
+    files it can read (the tsx grammar cannot parse an SFC and vice versa)."""
+    from .parser import language_for_path
+
+    if language == "vue":
+        from .vue import analyze_project
+
+        subset = {p: c for p, c in files.items()
+                  if p.endswith(".vue")
+                  or language_for_path(p) in ("typescript", "javascript")}
+    else:
+        from .react import analyze_project
+
+        subset = {p: c for p, c in files.items() if not p.endswith(".vue")}
+    return analyze_project(subset, language)
+
+
 def validate_rule(rule: Rule) -> None:
     """Raise RuleError if the rule cannot be executed deterministically."""
     if rule.type not in RULE_TYPES:
         raise RuleError(f"unknown rule type {rule.type!r}; expected one of {RULE_TYPES}")
     if rule.type == "semantic":
-        from .react import REACT_LANGUAGES, semantic_check_names
-
-        if rule.language not in REACT_LANGUAGES:
+        supported = _semantic_languages()
+        if rule.language not in supported:
             raise RuleError(
-                f"semantic rules support {REACT_LANGUAGES}, got {rule.language!r}")
+                f"semantic rules support {supported}, got {rule.language!r}")
+        from .flow import semantic_check_names
+
         if not rule.check or rule.check not in semantic_check_names():
             raise RuleError(
                 f"semantic rule {rule.id!r} needs check= one of: "
@@ -251,9 +292,7 @@ class RuleEngine:
                     continue
                 validate_rule(rule)
                 if analysis is None:
-                    from .react import analyze_source
-
-                    analysis = analyze_source(code, language)
+                    analysis = _semantic_analyze_source(code, language)
                 report.checked_rules.append(rule.id)
                 report.violations.extend(self._check_semantic(rule, analysis))
                 continue
@@ -274,25 +313,31 @@ class RuleEngine:
 
     def check_project(self, files: dict[str, str], language: str,
                       rules: list[Rule]) -> CheckReport:
-        """Check a whole project: semantic rules see all files at once;
-        query rules run per file whose language matches."""
+        """Check a whole project: semantic rules see all files at once
+        (each language's rules run on that language's analysis — a mixed
+        React+Vue tree gets both); query rules run per file whose language
+        matches."""
         from .parser import language_for_path
-        from .react import analyze_project
 
         report = CheckReport(language=language, syntax_ok=True)
         semantic = [r for r in rules if r.type == "semantic"]
         single = [r for r in rules if r.type != "semantic"]
 
-        analysis = None
-        if semantic:
-            analysis = analyze_project(files, language)
-            report.syntax_ok = analysis.syntax_ok
+        detected = {language} | {
+            lang for p in files if (lang := language_for_path(p))}
+        analyses: dict[str, Any] = {}
         for rule in semantic:
-            if rule.language != language:
+            if rule.language not in detected:
                 continue
             validate_rule(rule)
+            if rule.language not in analyses:
+                analyses[rule.language] = _semantic_analyze_project(
+                    files, rule.language)
+                report.syntax_ok = (report.syntax_ok
+                                    and analyses[rule.language].syntax_ok)
             report.checked_rules.append(rule.id)
-            report.violations.extend(self._check_semantic(rule, analysis))
+            report.violations.extend(
+                self._check_semantic(rule, analyses[rule.language]))
 
         for path in sorted(files):
             file_language = language_for_path(path) or language
@@ -315,7 +360,7 @@ class RuleEngine:
         return report
 
     def _check_semantic(self, rule: Rule, analysis: Any) -> list[RuleViolation]:
-        from .react import run_semantic_check
+        from .flow import run_semantic_check
 
         violations = []
         for finding in run_semantic_check(rule.check or "", analysis, rule.params):

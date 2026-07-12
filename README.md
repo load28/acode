@@ -41,6 +41,12 @@ answer:
   transformed hops render as `~[prop]~>`) and sees through custom hooks —
   `useUser()` wrapping a fetch-in-effect, hooks calling hooks across files,
   even a setter handed into a fetching hook (`useLoad(setUser)`).
+  The same model powers **Vue 3** (`.vue` SFCs, `<script setup>`): the
+  framework-neutral core lives in `astcore/flow.py`, with per-framework
+  front-ends — React (JSX/hooks) in `react.py`, Vue (defineProps, ref,
+  onMounted+fetch, composables, v-model/@event mutation edges,
+  provide/inject) in `vue.py`. Structural single-file rules (e.g.
+  ts-no-var) also run inside `.vue` script blocks with file-accurate lines.
 - **Rules are self-verified on insert.** A rule convention must mechanically
   flag its own `bad_example` and pass its own `good_example`, or the store
   rejects it. You cannot store a convention that can't be demonstrated.
@@ -171,7 +177,10 @@ Rule types:
   levels → use React Query), `react-shared-mutable-state` (useState
   value+setter fanning out to ≥ `min_branches` branches, or setter drilled
   ≥ `max_setter_depth` → use Context), `react-prop-drilling` (any value
-  drilled ≥ `max_depth`). Multi-file `good_example` / `bad_example`
+  drilled ≥ `max_depth`). Vue counterparts ship in `conventions/vue.json`
+  (`vue-server-state-drilling` → vue-query, `vue-shared-mutable-state` —
+  v-model/@event mutation from below + fan-out → provide/inject,
+  `vue-prop-drilling`). Multi-file `good_example` / `bad_example`
   snippets are written as one string with `// @file: path` marker lines —
   self-verification on insert works exactly as for query rules.
 

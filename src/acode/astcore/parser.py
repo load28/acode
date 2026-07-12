@@ -17,6 +17,10 @@ _GRAMMARS: dict[str, tuple[str, str]] = {
     "javascript": ("tree_sitter_javascript", "language"),
     "typescript": ("tree_sitter_typescript", "language_typescript"),
     "tsx": ("tree_sitter_typescript", "language_tsx"),
+    # vue is a pseudo-language: a .vue SFC's <script> block, parsed with the
+    # typescript grammar. parse() blanks out non-script lines so positions
+    # in the tree match the original file.
+    "vue": ("tree_sitter_typescript", "language_typescript"),
     "go": ("tree_sitter_go", "language"),
     "java": ("tree_sitter_java", "language"),
     "rust": ("tree_sitter_rust", "language"),
@@ -42,6 +46,7 @@ _EXTENSIONS = {
     ".ts": "typescript",
     ".mts": "typescript",
     ".tsx": "tsx",
+    ".vue": "vue",
     ".go": "go",
     ".java": "java",
     ".rs": "rust",
@@ -102,9 +107,13 @@ def get_language(name: str) -> Language:
 
 
 def parse(code: str | bytes, language: str) -> Tree:
-    data = code.encode("utf-8") if isinstance(code, str) else code
+    text = code.decode("utf-8") if isinstance(code, bytes) else code
+    if normalize_language(language) == "vue":
+        from .vue import script_only_view
+
+        text = script_only_view(text)
     parser = Parser(get_language(language))
-    return parser.parse(data)
+    return parser.parse(text.encode("utf-8"))
 
 
 def has_syntax_error(tree: Tree) -> bool:

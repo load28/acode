@@ -1,0 +1,57 @@
+[
+  {
+    "id": "vue-server-state-drilling",
+    "kind": "rule",
+    "language": "vue",
+    "title": "Server state drilled 3+ levels must move to vue-query (or Pinia)",
+    "guideline": "Data fetched in onMounted/watchEffect and stored in a ref, then passed down 3 or more component levels as props, is server state being hand-carried through the tree. Move the fetch into @tanstack/vue-query's useQuery (or Nuxt useFetch/useAsyncData, or a Pinia store) and read it in the component that actually uses it. Intermediate components must not know about the data at all.",
+    "metadata": {"framework": "vue", "category": "state-management", "tags": ["vue", "vue-query", "prop-drilling", "server-state"]},
+    "rule": {
+      "id": "vue-server-state-drilling",
+      "language": "vue",
+      "type": "semantic",
+      "check": "vue-server-state-drilling",
+      "params": {"max_depth": 3, "fetch_names": ["fetch", "axios"]},
+      "message": "server state must not be prop-drilled; fetch it with vue-query where it is used"
+    },
+    "good_example": "// @file: App.vue\n<script setup>\nimport Layout from \"./Layout.vue\";\n</script>\n<template>\n  <Layout />\n</template>\n\n// @file: Layout.vue\n<script setup>\nimport Sidebar from \"./Sidebar.vue\";\n</script>\n<template>\n  <Sidebar />\n</template>\n\n// @file: Sidebar.vue\n<script setup>\nimport UserCard from \"./UserCard.vue\";\n</script>\n<template>\n  <UserCard />\n</template>\n\n// @file: UserCard.vue\n<script setup>\nimport { useQuery } from \"@tanstack/vue-query\";\nconst { data: user } = useQuery({ queryKey: [\"user\"], queryFn: fetchUser });\n</script>\n<template>\n  <div>{{ user?.name }}</div>\n</template>\n",
+    "bad_example": "// @file: App.vue\n<script setup>\nimport { ref, onMounted } from \"vue\";\nimport Layout from \"./Layout.vue\";\nconst user = ref(null);\nonMounted(() => {\n  fetch(\"/api/user\").then((r) => r.json()).then((d) => { user.value = d; });\n});\n</script>\n<template>\n  <Layout :user=\"user\" />\n</template>\n\n// @file: Layout.vue\n<script setup>\nimport Sidebar from \"./Sidebar.vue\";\ndefineProps([\"user\"]);\n</script>\n<template>\n  <Sidebar :user=\"user\" />\n</template>\n\n// @file: Sidebar.vue\n<script setup>\nimport UserCard from \"./UserCard.vue\";\ndefineProps([\"user\"]);\n</script>\n<template>\n  <UserCard :user=\"user\" />\n</template>\n\n// @file: UserCard.vue\n<script setup>\ndefineProps([\"user\"]);\n</script>\n<template>\n  <div>{{ user?.name }}</div>\n</template>\n"
+  },
+  {
+    "id": "vue-shared-mutable-state",
+    "kind": "rule",
+    "language": "vue",
+    "title": "A ref mutated from below and shared across branches must use provide/inject",
+    "guideline": "When a ref is passed down as a prop AND children mutate it from below (v-model on a child component, or @event handlers assigning it), with the value fanning out to 2+ child branches, the intent is a global change: one component updates, distant parts react. Use provide/inject (or a Pinia store) instead of threading value+events through the tree.",
+    "metadata": {"framework": "vue", "category": "state-management", "tags": ["vue", "provide-inject", "prop-drilling", "shared-state"]},
+    "rule": {
+      "id": "vue-shared-mutable-state",
+      "language": "vue",
+      "type": "semantic",
+      "check": "vue-shared-mutable-state",
+      "params": {"min_branches": 2, "max_depth": 3},
+      "message": "shared mutable state must live in provide/inject (or a Pinia store), not travel as v-model/event props"
+    },
+    "good_example": "// @file: App.vue\n<script setup>\nimport { ref, provide } from \"vue\";\nimport Toolbar from \"./Toolbar.vue\";\nimport Results from \"./Results.vue\";\nconst filter = ref(\"\");\nprovide(\"filter\", filter);\n</script>\n<template>\n  <div>\n    <Toolbar />\n    <Results />\n  </div>\n</template>\n\n// @file: Toolbar.vue\n<script setup>\nimport { inject } from \"vue\";\nconst filter = inject(\"filter\");\n</script>\n<template>\n  <input v-model=\"filter\" />\n</template>\n\n// @file: Results.vue\n<script setup>\nimport { inject } from \"vue\";\nconst filter = inject(\"filter\");\n</script>\n<template>\n  <div>{{ filter }}</div>\n</template>\n",
+    "bad_example": "// @file: App.vue\n<script setup>\nimport { ref } from \"vue\";\nimport Toolbar from \"./Toolbar.vue\";\nimport Results from \"./Results.vue\";\nconst filter = ref(\"\");\n</script>\n<template>\n  <div>\n    <Toolbar v-model=\"filter\" />\n    <Results :filter=\"filter\" />\n  </div>\n</template>\n\n// @file: Toolbar.vue\n<script setup>\ndefineProps([\"modelValue\"]);\ndefineEmits([\"update:modelValue\"]);\n</script>\n<template>\n  <input :value=\"modelValue\" @input=\"$emit('update:modelValue', $event.target.value)\" />\n</template>\n\n// @file: Results.vue\n<script setup>\ndefineProps([\"filter\"]);\n</script>\n<template>\n  <div>{{ filter }}</div>\n</template>\n"
+  },
+  {
+    "id": "vue-prop-drilling",
+    "kind": "rule",
+    "language": "vue",
+    "title": "No prop drilling deeper than 2 levels",
+    "guideline": "A value passed through 3+ component boundaries, where the intermediates only forward it, couples the whole path to that prop. Restructure: slots (pass the rendered content instead of the data), provide/inject, or a Pinia store — depending on what the value is.",
+    "metadata": {"framework": "vue", "category": "state-management", "tags": ["vue", "prop-drilling", "slots"]},
+    "rule": {
+      "id": "vue-prop-drilling",
+      "language": "vue",
+      "type": "semantic",
+      "check": "vue-prop-drilling",
+      "params": {"max_depth": 3},
+      "message": "prop drilled through 3+ component levels; restructure with slots, provide/inject, or a store",
+      "severity": "warning"
+    },
+    "good_example": "// @file: App.vue\n<script setup>\nimport Layout from \"./Layout.vue\";\nconst theme = \"dark\";\n</script>\n<template>\n  <Layout :theme=\"theme\" />\n</template>\n\n// @file: Layout.vue\n<script setup>\nimport Header from \"./Header.vue\";\ndefineProps([\"theme\"]);\n</script>\n<template>\n  <Header :theme=\"theme\" />\n</template>\n\n// @file: Header.vue\n<script setup>\ndefineProps([\"theme\"]);\n</script>\n<template>\n  <header :class=\"theme\">hi</header>\n</template>\n",
+    "bad_example": "// @file: App.vue\n<script setup>\nimport Layout from \"./Layout.vue\";\nconst theme = \"dark\";\n</script>\n<template>\n  <Layout :theme=\"theme\" />\n</template>\n\n// @file: Layout.vue\n<script setup>\nimport Header from \"./Header.vue\";\ndefineProps([\"theme\"]);\n</script>\n<template>\n  <Header :theme=\"theme\" />\n</template>\n\n// @file: Header.vue\n<script setup>\nimport Title from \"./Title.vue\";\ndefineProps([\"theme\"]);\n</script>\n<template>\n  <Title :theme=\"theme\" />\n</template>\n\n// @file: Title.vue\n<script setup>\ndefineProps([\"theme\"]);\n</script>\n<template>\n  <h1 :class=\"theme\">hi</h1>\n</template>\n"
+  }
+]

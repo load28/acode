@@ -74,7 +74,7 @@ def check_project(files: dict[str, str], language: str,
     return _ENGINE.check_project(files, language, rules)
 
 
-_PROJECT_EXTENSIONS = (".tsx", ".jsx", ".ts", ".js")
+_PROJECT_EXTENSIONS = (".tsx", ".jsx", ".ts", ".js", ".vue")
 _PROJECT_SKIP_DIRS = {"node_modules", "dist", "build", ".next", "coverage"}
 
 

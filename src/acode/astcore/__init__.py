@@ -7,6 +7,7 @@ from .react import (
     semantic_check_names,
     split_virtual_files,
 )
+from . import vue as _vue  # noqa: F401 — registers the vue-* semantic checks
 
 __all__ = [
     "get_language",
