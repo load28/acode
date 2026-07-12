@@ -153,6 +153,11 @@ pip install -e '.[adk,dev]'
 pytest
 ```
 
+All work on this repo is tracked per task in [`docs/tasks/INDEX.md`](docs/tasks/INDEX.md)
+(task docs record per-file changes, decisions, and verification results so any
+session can pick up where the last one left off). Workflow rules live in
+[`CLAUDE.md`](CLAUDE.md).
+
 ## License
 
 MIT
