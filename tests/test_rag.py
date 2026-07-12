@@ -76,6 +76,26 @@ class TestSearch:
         second = [h.convention.id for h in store.search("python")]
         assert first == second == ["a", "b", "c"]
 
+    def test_generic_entry_matches_any_metadata_value(self, store):
+        # a rule without a framework key is generic: it must still apply
+        # when the caller filters by framework (wildcard semantics)
+        store.add(_rule_convention("generic-rule", {"category": "logging"}))
+        store.add(_rule_convention("fastapi-rule", {"framework": "fastapi"}))
+        store.add(_rule_convention("django-rule", {"framework": "django"}))
+        hits = store.search("python", metadata={"framework": "fastapi"})
+        ids = [h.convention.id for h in hits]
+        assert "generic-rule" in ids and "fastapi-rule" in ids
+        assert "django-rule" not in ids
+        # the exact-match entry ranks above the generic one
+        assert ids.index("fastapi-rule") < ids.index("generic-rule")
+
+    def test_generic_rules_apply_during_generation(self, seeded_store):
+        from acode.agent import steps
+
+        rules = steps.applicable_rules(seeded_store, "python",
+                                       {"framework": "fastapi"})
+        assert {r.id for r in rules} >= {"py-no-print", "py-no-bare-except"}
+
     def test_language_isolation(self, store):
         store.add(_rule_convention())
         assert store.search("typescript") == []

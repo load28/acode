@@ -138,11 +138,15 @@ class SearchHit:
 
 
 def _metadata_matches(entry_meta: dict[str, Any], filters: dict[str, Any]) -> bool:
-    """Hard filter: every requested key must be satisfied by the entry."""
+    """Hard filter with wildcard semantics: an entry that doesn't declare a
+    requested key matches any value for it (a generic no-print rule applies
+    to fastapi projects too); an entry that does declare it must agree."""
     for key, wanted in filters.items():
         if wanted is None:
             continue
         have = entry_meta.get(key)
+        if have is None:
+            continue  # entry doesn't constrain this key -> applies everywhere
         if isinstance(wanted, (list, tuple, set)):
             have_set = set(have) if isinstance(have, list) else {have}
             if not set(wanted) & have_set:
@@ -156,14 +160,16 @@ def _metadata_matches(entry_meta: dict[str, Any], filters: dict[str, Any]) -> bo
 
 
 def _metadata_overlap(entry_meta: dict[str, Any], query_meta: dict[str, Any]) -> float:
-    """Soft score in [0, 1]: fraction of query metadata the entry shares."""
+    """Soft score in [0, 1]: fraction of query metadata the entry *declares
+    and* matches. Unlike the hard filter, an absent key earns no score —
+    wildcard entries pass the filter but rank below exact matches."""
     if not query_meta:
         return 0.0
     hits = 0
     for key, wanted in query_meta.items():
         if wanted is None:
             continue
-        if _metadata_matches(entry_meta, {key: wanted}):
+        if entry_meta.get(key) is not None and _metadata_matches(entry_meta, {key: wanted}):
             hits += 1
     considered = sum(1 for v in query_meta.values() if v is not None)
     return hits / considered if considered else 0.0
