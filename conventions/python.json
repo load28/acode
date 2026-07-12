@@ -1,0 +1,159 @@
+[
+  {
+    "id": "py-no-print",
+    "kind": "rule",
+    "language": "python",
+    "title": "Use logging instead of print()",
+    "guideline": "Application code must not call print(); use the module-level logger instead.",
+    "metadata": {"category": "logging", "tags": ["logging", "observability"]},
+    "rule": {
+      "id": "py-no-print",
+      "language": "python",
+      "type": "forbid",
+      "query": "(call function: (identifier) @fn (#eq? @fn \"print\"))",
+      "capture": "fn",
+      "message": "print() is forbidden; use logger.info/debug instead"
+    },
+    "good_example": "import logging\n\nlogger = logging.getLogger(__name__)\n\ndef greet(name):\n    logger.info(\"hello %s\", name)\n",
+    "bad_example": "def greet(name):\n    print(f\"hello {name}\")\n"
+  },
+  {
+    "id": "py-snake-case-functions",
+    "kind": "rule",
+    "language": "python",
+    "title": "Function names are snake_case",
+    "guideline": "All function and method names use snake_case (dunder names allowed).",
+    "metadata": {"category": "naming", "tags": ["naming", "pep8"]},
+    "rule": {
+      "id": "py-snake-case-functions",
+      "language": "python",
+      "type": "naming",
+      "query": "(function_definition name: (identifier) @name)",
+      "capture": "name",
+      "regex": "_{0,2}[a-z][a-z0-9_]*_{0,2}",
+      "message": "function names must be snake_case"
+    },
+    "good_example": "def load_user(user_id):\n    return user_id\n",
+    "bad_example": "def LoadUser(userId):\n    return userId\n"
+  },
+  {
+    "id": "py-no-mutable-default",
+    "kind": "rule",
+    "language": "python",
+    "title": "No mutable default arguments",
+    "guideline": "Never use list/dict literals as default parameter values; default to None and initialize inside the function.",
+    "metadata": {"category": "correctness", "tags": ["bugs", "pep8"]},
+    "rule": {
+      "id": "py-no-mutable-default",
+      "language": "python",
+      "type": "forbid",
+      "query": "(default_parameter value: [(list) (dictionary)] @bad)",
+      "capture": "bad",
+      "message": "mutable default argument; use None and initialize inside the body"
+    },
+    "good_example": "def collect(items=None):\n    items = items if items is not None else []\n    return items\n",
+    "bad_example": "def collect(items=[]):\n    return items\n"
+  },
+  {
+    "id": "py-docstring-required",
+    "kind": "rule",
+    "language": "python",
+    "title": "Functions carry docstrings",
+    "guideline": "Every function definition starts with a docstring describing behavior.",
+    "metadata": {"category": "docs", "tags": ["docs"]},
+    "rule": {
+      "id": "py-docstring-required",
+      "language": "python",
+      "type": "require_in",
+      "scope_query": "(function_definition) @scope",
+      "capture": "scope",
+      "query": "(function_definition body: (block . (expression_statement (string))))",
+      "message": "function is missing a docstring",
+      "severity": "warning"
+    },
+    "good_example": "def add(a, b):\n    \"\"\"Return the sum of a and b.\"\"\"\n    return a + b\n",
+    "bad_example": "def add(a, b):\n    return a + b\n"
+  },
+  {
+    "id": "py-no-eval",
+    "kind": "rule",
+    "language": "python",
+    "title": "No eval()/exec()",
+    "guideline": "Dynamic code execution via eval/exec is forbidden; use explicit dispatch instead.",
+    "metadata": {"category": "security", "tags": ["security"]},
+    "rule": {
+      "id": "py-no-eval",
+      "language": "python",
+      "type": "forbid",
+      "query": "(call function: (identifier) @fn (#any-of? @fn \"eval\" \"exec\"))",
+      "capture": "fn",
+      "message": "eval()/exec() is forbidden; use explicit dispatch"
+    },
+    "good_example": "handlers = {\"add\": lambda a, b: a + b}\nresult = handlers[\"add\"](1, 2)\n",
+    "bad_example": "result = eval(\"1 + 2\")\n"
+  },
+  {
+    "id": "py-class-pascal-case",
+    "kind": "rule",
+    "language": "python",
+    "title": "Class names are PascalCase",
+    "guideline": "All class names use PascalCase.",
+    "metadata": {"category": "naming", "tags": ["naming", "pep8"]},
+    "rule": {
+      "id": "py-class-pascal-case",
+      "language": "python",
+      "type": "naming",
+      "query": "(class_definition name: (identifier) @name)",
+      "capture": "name",
+      "regex": "[A-Z][A-Za-z0-9]*",
+      "message": "class names must be PascalCase"
+    },
+    "good_example": "class UserService:\n    \"\"\"Service.\"\"\"\n",
+    "bad_example": "class user_service:\n    pass\n"
+  },
+  {
+    "id": "py-no-bare-except",
+    "kind": "rule",
+    "language": "python",
+    "title": "No bare except",
+    "guideline": "Always catch a specific exception type; a bare `except:` swallows KeyboardInterrupt and SystemExit.",
+    "metadata": {"category": "correctness", "tags": ["bugs", "errors"]},
+    "rule": {
+      "id": "py-no-bare-except",
+      "language": "python",
+      "type": "forbid",
+      "query": "(except_clause . (block)) @bad",
+      "capture": "bad",
+      "message": "bare except is forbidden; catch a specific exception type"
+    },
+    "good_example": "try:\n    load()\nexcept ValueError:\n    handle()\n",
+    "bad_example": "try:\n    load()\nexcept:\n    pass\n"
+  },
+  {
+    "id": "py-pattern-pytest-test",
+    "kind": "pattern",
+    "language": "python",
+    "title": "pytest test function shape",
+    "guideline": "Tests are plain functions with arrange/act/assert, using fixtures as parameters.",
+    "metadata": {"framework": "pytest", "category": "testing", "tags": ["pytest", "testing"]},
+    "good_example": "def test_load_user_returns_profile(store):\n    \"\"\"Loading an existing user yields its profile.\"\"\"\n    store.add(make_user(id=7))\n    profile = load_user(store, 7)\n    assert profile.id == 7\n"
+  },
+  {
+    "id": "py-pattern-dataclass-model",
+    "kind": "pattern",
+    "language": "python",
+    "title": "dataclass model shape",
+    "guideline": "Plain data carriers are frozen dataclasses with typed fields and a to_dict helper.",
+    "metadata": {"category": "modeling", "tags": ["dataclass"]},
+    "good_example": "@dataclass(frozen=True)\nclass UserProfile:\n    \"\"\"Immutable user profile.\"\"\"\n    id: int\n    name: str\n\n    def to_dict(self) -> dict:\n        \"\"\"Serialize for transport.\"\"\"\n        return {\"id\": self.id, \"name\": self.name}\n"
+  },
+  {
+    "id": "py-pattern-fastapi-route",
+    "kind": "pattern",
+    "language": "python",
+    "title": "FastAPI route handler shape",
+    "guideline": "Route handlers are async, typed, and return response models directly.",
+    "metadata": {"framework": "fastapi", "category": "api", "tags": ["fastapi", "http"]},
+    "good_example": "@router.get(\"/users/{user_id}\", response_model=UserOut)\nasync def get_user(user_id: int, session: AsyncSession = Depends(get_session)) -> UserOut:\n    \"\"\"Fetch a single user by id.\"\"\"\n    user = await users.get(session, user_id)\n    if user is None:\n        raise HTTPException(status_code=404, detail=\"user not found\")\n    return UserOut.model_validate(user)\n"
+  }
+]

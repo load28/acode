@@ -1,0 +1,121 @@
+[
+  {
+    "id": "ts-no-var",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No var declarations",
+    "guideline": "Use const (or let when reassignment is required); var is forbidden.",
+    "metadata": {"category": "correctness", "tags": ["es6"]},
+    "rule": {
+      "id": "ts-no-var",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "(variable_declaration) @bad",
+      "capture": "bad",
+      "message": "var is forbidden; use const or let"
+    },
+    "good_example": "const total = 1;\nlet count = 0;\ncount += total;\n",
+    "bad_example": "var total = 1;\n"
+  },
+  {
+    "id": "ts-no-console-log",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No console.* in application code",
+    "guideline": "Use the shared logger module instead of console.*.",
+    "metadata": {"category": "logging", "tags": ["logging"]},
+    "rule": {
+      "id": "ts-no-console-log",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "(call_expression function: (member_expression object: (identifier) @obj) (#eq? @obj \"console\"))",
+      "capture": "obj",
+      "message": "console.* is forbidden; use the logger module"
+    },
+    "good_example": "import { logger } from \"./logger\";\nlogger.info(\"ready\");\n",
+    "bad_example": "console.log(\"ready\");\n"
+  },
+  {
+    "id": "ts-no-any",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No explicit any",
+    "guideline": "Type everything explicitly; use unknown + narrowing instead of any.",
+    "metadata": {"category": "types", "tags": ["typescript", "strict"]},
+    "rule": {
+      "id": "ts-no-any",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "((predefined_type) @t (#eq? @t \"any\"))",
+      "capture": "t",
+      "message": "explicit any is forbidden; use unknown or a precise type"
+    },
+    "good_example": "function parse(input: unknown): number {\n  return Number(input);\n}\n",
+    "bad_example": "function parse(input: any): number {\n  return Number(input);\n}\n"
+  },
+  {
+    "id": "ts-no-ts-ignore",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No @ts-ignore",
+    "guideline": "Never silence the type checker with @ts-ignore; fix the type or use @ts-expect-error with a reason.",
+    "metadata": {"category": "types", "tags": ["typescript", "strict"]},
+    "rule": {
+      "id": "ts-no-ts-ignore",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "((comment) @c (#match? @c \"@ts-ignore\"))",
+      "capture": "c",
+      "message": "@ts-ignore is forbidden; fix the type error properly"
+    },
+    "good_example": "const port: number = Number(process.env.PORT ?? 3000);\n",
+    "bad_example": "// @ts-ignore\nconst port: number = process.env.PORT;\n"
+  },
+  {
+    "id": "ts-func-camel-case",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "Functions are camelCase",
+    "guideline": "Function names use camelCase.",
+    "metadata": {"category": "naming", "tags": ["naming"]},
+    "rule": {
+      "id": "ts-func-camel-case",
+      "language": "typescript",
+      "type": "naming",
+      "query": "(function_declaration name: (identifier) @name)",
+      "capture": "name",
+      "regex": "[a-z][A-Za-z0-9]*",
+      "message": "function names must be camelCase"
+    },
+    "good_example": "function loadUser(id: number): string {\n  return String(id);\n}\n",
+    "bad_example": "function load_user(id: number): string {\n  return String(id);\n}\n"
+  },
+  {
+    "id": "ts-pattern-result-type",
+    "kind": "pattern",
+    "language": "typescript",
+    "title": "Result union for fallible operations",
+    "guideline": "Fallible functions return a discriminated Result union instead of throwing.",
+    "metadata": {"category": "errors", "tags": ["errors", "typescript"]},
+    "good_example": "type Result<T> =\n  | { ok: true; value: T }\n  | { ok: false; error: string };\n\nexport function parsePort(input: string): Result<number> {\n  const port = Number(input);\n  if (!Number.isInteger(port) || port <= 0) {\n    return { ok: false, error: `invalid port: ${input}` };\n  }\n  return { ok: true, value: port };\n}\n"
+  },
+  {
+    "id": "ts-interface-pascal-case",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "Interfaces are PascalCase",
+    "guideline": "Interface names use PascalCase without an I- prefix.",
+    "metadata": {"category": "naming", "tags": ["naming"]},
+    "rule": {
+      "id": "ts-interface-pascal-case",
+      "language": "typescript",
+      "type": "naming",
+      "query": "(interface_declaration name: (type_identifier) @name)",
+      "capture": "name",
+      "regex": "[A-Z][A-Za-z0-9]*",
+      "message": "interface names must be PascalCase"
+    },
+    "good_example": "interface UserProfile {\n  id: number;\n  name: string;\n}\n",
+    "bad_example": "interface user_profile {\n  id: number;\n  name: string;\n}\n"
+  }
+]
