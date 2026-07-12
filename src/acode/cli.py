@@ -9,6 +9,8 @@
     acode index <path> [--language L]    index a codebase as patterns
     acode corpus build [...]             (re)build the corpus database
     acode corpus stats                   corpus composition and index stats
+    acode generate <task> --language L   full pipeline: RAG -> LLM -> verify -> repair
+    acode review <file> [...]            mechanical verdict + LLM review & fix
 """
 
 from __future__ import annotations
@@ -71,6 +73,32 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("path")
     p.add_argument("--language")
     p.add_argument("--max-files", type=int, default=500)
+
+    p = sub.add_parser(
+        "generate", help="generate code via the pipeline (RAG -> LLM -> verify -> repair)")
+    p.add_argument("task")
+    p.add_argument("--language", required=True)
+    p.add_argument("--framework")
+    p.add_argument("--category")
+    p.add_argument("--tag", action="append", dest="tags")
+    p.add_argument("--context-file", help="surrounding code passed to retrieval + prompt")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="log each pipeline stage to stderr as it happens")
+    p.add_argument("--no-trace", action="store_true",
+                   help="omit the step-by-step trace array from the JSON output")
+
+    p = sub.add_parser(
+        "review", help="review/fix a file (mechanical verdict + LLM review, fix re-verified)")
+    p.add_argument("file")
+    p.add_argument("--language")
+    p.add_argument("--instruction", help="requested change, if any")
+    p.add_argument("--framework")
+    p.add_argument("--category")
+    p.add_argument("--tag", action="append", dest="tags")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="log each pipeline stage to stderr as it happens")
+    p.add_argument("--no-trace", action="store_true",
+                   help="omit the step-by-step trace array from the JSON output")
 
     args = parser.parse_args(argv)
     config = AcodeConfig()
@@ -155,6 +183,54 @@ def main(argv: list[str] | None = None) -> int:
         print(f"indexed {len(result['indexed'])} pattern(s) "
               f"from {result['files']} file(s), skipped {result['skipped']}")
         return 0
+
+    if args.command in ("generate", "review"):
+        # The plain pipeline is used on purpose: it carries the step trace.
+        import asyncio
+        import logging
+
+        from .agent.pipeline import CodingPipeline
+
+        if args.verbose:
+            handler = logging.StreamHandler(sys.stderr)
+            handler.setFormatter(
+                logging.Formatter("%(asctime)s %(name)s %(message)s", datefmt="%H:%M:%S"))
+            pipeline_logger = logging.getLogger("acode.pipeline")
+            pipeline_logger.addHandler(handler)
+            pipeline_logger.setLevel(logging.INFO)
+
+        metadata: dict = {}
+        if args.framework:
+            metadata["framework"] = args.framework
+        if args.category:
+            metadata["category"] = args.category
+        if args.tags:
+            metadata["tags"] = args.tags
+
+        pipeline = CodingPipeline(store, None, config)
+        if args.command == "generate":
+            context = (Path(args.context_file).read_text(encoding="utf-8")
+                       if args.context_file else None)
+            result = asyncio.run(pipeline.generate(
+                args.task, args.language, metadata or None, context))
+            exit_code = 0 if result.verified else 1
+        else:
+            language = args.language or language_for_path(args.file)
+            if not language:
+                print(f"cannot infer language for {args.file}; pass --language",
+                      file=sys.stderr)
+                return 2
+            code = Path(args.file).read_text(encoding="utf-8")
+            result = asyncio.run(pipeline.review(
+                code, language, metadata or None, args.instruction))
+            exit_code = 0
+
+        out = result.to_dict()
+        if args.no_trace:
+            out.pop("trace", None)
+        json.dump(out, sys.stdout, ensure_ascii=False, indent=2)
+        print()
+        return exit_code
 
     parser.error(f"unknown command {args.command!r}")
     return 2

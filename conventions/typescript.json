@@ -100,6 +100,70 @@
     "good_example": "type Result<T> =\n  | { ok: true; value: T }\n  | { ok: false; error: string };\n\nexport function parsePort(input: string): Result<number> {\n  const port = Number(input);\n  if (!Number.isInteger(port) || port <= 0) {\n    return { ok: false, error: `invalid port: ${input}` };\n  }\n  return { ok: true, value: port };\n}\n"
   },
   {
+    "id": "ts-no-enum",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No enum — use an as const object with a derived type",
+    "guideline": "Never declare enum (or const enum). Model finite value sets as a plain object literal frozen with `as const`, and derive the union type from it: `type T = typeof Obj[keyof typeof Obj]`. This keeps values erasable, tree-shakeable and structurally typed.",
+    "metadata": {"category": "types", "tags": ["typescript", "enum", "as-const", "strict"]},
+    "rule": {
+      "id": "ts-no-enum",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "(enum_declaration) @bad",
+      "capture": "bad",
+      "message": "enum is forbidden; use an `as const` object and derive the type: `type T = typeof Obj[keyof typeof Obj]`"
+    },
+    "good_example": "export const OrderStatus = {\n  Pending: \"PENDING\",\n  Shipped: \"SHIPPED\",\n  Delivered: \"DELIVERED\",\n} as const;\n\nexport type OrderStatus = typeof OrderStatus[keyof typeof OrderStatus];\n",
+    "bad_example": "export enum OrderStatus {\n  Pending = \"PENDING\",\n  Shipped = \"SHIPPED\",\n  Delivered = \"DELIVERED\",\n}\n"
+  },
+  {
+    "id": "ts-pattern-const-object-enum",
+    "kind": "pattern",
+    "language": "typescript",
+    "title": "as const object as an enum replacement (values + derived type + guard)",
+    "guideline": "The full enum-replacement shape: an `as const` object holding the values, a same-named derived union type, and a type guard for narrowing unknown input.",
+    "metadata": {"category": "types", "tags": ["typescript", "enum", "as-const"]},
+    "good_example": "export const LogLevel = {\n  Debug: \"debug\",\n  Info: \"info\",\n  Warn: \"warn\",\n  Error: \"error\",\n} as const;\n\nexport type LogLevel = typeof LogLevel[keyof typeof LogLevel];\n\nconst LOG_LEVEL_VALUES: readonly string[] = Object.values(LogLevel);\n\nexport function isLogLevel(value: unknown): value is LogLevel {\n  return typeof value === \"string\" && LOG_LEVEL_VALUES.includes(value);\n}\n"
+  },
+  {
+    "id": "ts-no-non-null-assertion",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No non-null assertion (!)",
+    "guideline": "Never use the postfix `!` operator to silence nullability; narrow explicitly (if-check, ?? default, or a type guard) so the compiler proves the value exists.",
+    "metadata": {"category": "types", "tags": ["typescript", "strict", "null-safety"]},
+    "rule": {
+      "id": "ts-no-non-null-assertion",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "(non_null_expression) @bad",
+      "capture": "bad",
+      "message": "non-null assertion (!) is forbidden; narrow the type explicitly instead"
+    },
+    "good_example": "const el = document.getElementById(\"app\");\nif (el === null) {\n  throw new Error(\"missing #app element\");\n}\nel.textContent = \"ready\";\n",
+    "bad_example": "const el = document.getElementById(\"app\")!;\nel.textContent = \"ready\";\n"
+  },
+  {
+    "id": "ts-type-alias-pascal-case",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "Type aliases are PascalCase",
+    "guideline": "Type alias names use PascalCase, matching interfaces and classes.",
+    "metadata": {"category": "naming", "tags": ["naming", "typescript"]},
+    "rule": {
+      "id": "ts-type-alias-pascal-case",
+      "language": "typescript",
+      "type": "naming",
+      "query": "(type_alias_declaration name: (type_identifier) @name)",
+      "capture": "name",
+      "regex": "[A-Z][A-Za-z0-9]*",
+      "message": "type alias names must be PascalCase"
+    },
+    "good_example": "type UserId = string;\n",
+    "bad_example": "type user_id = string;\n"
+  },
+  {
     "id": "ts-interface-pascal-case",
     "kind": "rule",
     "language": "typescript",
