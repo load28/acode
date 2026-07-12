@@ -93,9 +93,12 @@ class TestCorpusBuild:
         # the built corpus is actually queryable
         store = ConventionStore(db)
         hits = store.search("python", query="bm25 inverted index")
-        assert hits and "BM25Index" in hits[0].convention.title
+        top_titles = " | ".join(h.convention.title for h in hits[:5])
+        assert "BM25" in top_titles  # the repo's own search code is retrievable
         stats = corpus_stats(store)
-        assert stats["bm25_terms"] > 100
+        assert stats["search"]["lexical_engine"] in ("tantivy", "builtin-bm25")
+        assert stats["search"]["vector_engine"] in ("faiss", "builtin-cosine")
+        assert stats["search"]["docs"] == stats["entries"]
         assert stats["rules"] >= 12
 
     def test_rebuild_is_fresh(self, tmp_path):

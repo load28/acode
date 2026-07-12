@@ -4,13 +4,14 @@
 > 규칙: [/CLAUDE.md](../../CLAUDE.md) · 새 태스크: [TEMPLATE.md](TEMPLATE.md) 복사
 > 상태: `todo` 착수 전 · `in_progress` 진행 중 · `blocked` 대기(문서에 사유) · `done` 완료+검증
 
-**마지막 태스크 번호: 0003** (새 태스크는 0004부터)
+**마지막 태스크 번호: 0004** (새 태스크는 0005부터)
 
 | ID | 제목 | 상태 | 시작 | 완료 | 주요 파일 |
 |---|---|---|---|---|---|
 | [TASK-0001](TASK-0001-initial-implementation.md) | AST 기반 컨벤션 코딩 에이전트 초기 구현 (ADK + MCP) | done | 2026-07-12 | 2026-07-12 | `src/acode/**`, `conventions/*.json`, `tests/**`, `pyproject.toml` |
 | [TASK-0002](TASK-0002-task-tracking-system.md) | 태스크 단위 작업 기록 체계 도입 | done | 2026-07-12 | 2026-07-12 | `CLAUDE.md`, `docs/tasks/**`, `README.md` |
 | [TASK-0003](TASK-0003-rag-corpus-search-engine.md) | 실제 RAG 코퍼스 구축 + 하이브리드 서치엔진 (BM25+AST+메타) | done | 2026-07-12 | 2026-07-12 | `src/acode/rag/textindex.py`, `src/acode/rag/corpus.py`, `src/acode/rag/store.py`, `conventions/*.json`, `src/acode/cli.py` |
+| [TASK-0004](TASK-0004-oss-search-engines.md) | 검색 엔진을 선두 오픈소스로 교체 (Tantivy + FAISS, 빌트인 폴백) | done | 2026-07-12 | 2026-07-12 | `src/acode/rag/engines.py`, `src/acode/rag/store.py`, `pyproject.toml`, `tests/test_engines.py` |
 
 ## 열린 태스크 (todo / in_progress / blocked)
 

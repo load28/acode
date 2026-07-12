@@ -84,13 +84,17 @@ def corpus_stats(store: ConventionStore) -> dict[str, Any]:
     for conv in entries:
         by_language[conv.language] = by_language.get(conv.language, 0) + 1
         by_kind[conv.kind] = by_kind.get(conv.kind, 0) + 1
-    index = store.text_index()
+    lexical = store.lexical_engine()
+    vector = store.vector_engine()
     return {
         "entries": len(entries),
         "by_language": dict(sorted(by_language.items())),
         "by_kind": dict(sorted(by_kind.items())),
         "rules": by_kind.get("rule", 0),
         "patterns": by_kind.get("pattern", 0),
-        "bm25_terms": len(index.postings),
-        "bm25_avg_doc_len": round(index.avg_len, 1),
+        "search": {
+            "lexical_engine": lexical.name,
+            "vector_engine": vector.name,
+            **lexical.stats(),
+        },
     }

@@ -13,10 +13,14 @@ Entries come in two kinds:
 
 Retrieval is a deterministic hybrid search engine:
     1. hard filter on language / kind / metadata (SQL + JSON match)
-    2. rank by combining up to three signals — BM25 over a text query
-       (inverted index, see textindex.py), AST-fingerprint cosine
-       against query code, and metadata overlap. Ties break on id, so
-       the same query always returns the same list in the same order.
+    2. rank by combining up to three signals — BM25 over a text query,
+       AST-fingerprint cosine against query code, and metadata overlap.
+       Ties break on id, so the same query always returns the same list
+       in the same order.
+
+The lexical and vector signals run on pluggable engines (see
+engines.py): Tantivy and FAISS when installed — the leading open-source
+engines for each role — with builtin fallbacks otherwise.
 
 Storage is a single SQLite file — no external services.
 """
@@ -31,10 +35,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from ..astcore.fingerprint import DIM, cosine, fingerprint_code
+from ..astcore.fingerprint import DIM, fingerprint_code
 from ..astcore.parser import normalize_language
 from ..astcore.rules import Rule, RuleEngine, RuleError, validate_rule
-from .textindex import BM25Index, document_text
+from .engines import (
+    LexicalEngine,
+    VectorEngine,
+    create_lexical_engine,
+    create_vector_engine,
+)
+from .textindex import document_text
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conventions (
@@ -167,21 +177,36 @@ class ConventionStore:
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.executescript(_SCHEMA)
         self._engine = RuleEngine()
-        self._text_index: BM25Index | None = None  # rebuilt lazily on writes
+        # search engines, rebuilt lazily after writes
+        self._lexical: LexicalEngine | None = None
+        self._vector: VectorEngine | None = None
 
     def close(self) -> None:
         self._conn.close()
 
     def _invalidate_index(self) -> None:
-        self._text_index = None
+        self._lexical = None
+        self._vector = None
 
-    def text_index(self) -> BM25Index:
-        """The BM25 inverted index over all conventions (built lazily)."""
-        if self._text_index is None:
-            self._text_index = BM25Index.build(
-                (conv.id, document_text(conv)) for conv in self.list()
-            )
-        return self._text_index
+    def lexical_engine(self) -> LexicalEngine:
+        """Full-text engine over all conventions (built lazily)."""
+        if self._lexical is None:
+            engine = create_lexical_engine()
+            engine.build([(conv.id, document_text(conv)) for conv in self.list()])
+            self._lexical = engine
+        return self._lexical
+
+    def vector_engine(self) -> VectorEngine:
+        """AST-fingerprint similarity engine (built lazily)."""
+        if self._vector is None:
+            engine = create_vector_engine()
+            engine.build([
+                (conv.id, conv.fingerprint)
+                for conv in self.list()
+                if conv.fingerprint and len(conv.fingerprint) == DIM
+            ])
+            self._vector = engine
+        return self._vector
 
     # ------------------------------------------------------------- write
 
@@ -329,10 +354,11 @@ class ConventionStore:
         ]
 
         query_fp = fingerprint_code(code, language) if code else None
-        text_scores = self.text_index().normalized_scores(query) if query else None
+        ast_scores = self.vector_engine().similarities(query_fp) if query_fp else None
+        text_scores = self.lexical_engine().scores(query) if query else None
 
         weights: dict[str, float] = {"meta": 0.20}
-        if query_fp is not None:
+        if ast_scores is not None:
             weights["ast"] = 0.45
         if text_scores is not None:
             weights["text"] = 0.35
@@ -343,11 +369,8 @@ class ConventionStore:
             parts: dict[str, float] = {
                 "meta": _metadata_overlap(conv.metadata, metadata)
             }
-            if query_fp is not None:
-                if conv.fingerprint and len(conv.fingerprint) == DIM:
-                    ast_score = max(0.0, cosine(query_fp, conv.fingerprint))
-                else:
-                    ast_score = 0.0
+            if ast_scores is not None:
+                ast_score = ast_scores.get(conv.id, 0.0)
                 if ast_score < min_similarity:
                     continue
                 parts["ast"] = ast_score

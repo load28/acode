@@ -260,6 +260,10 @@ def build_server(config: AcodeConfig | None = None,
             "languages": supported_languages(),
             "db_path": store.db_path,
             "conventions": len(store.list()),
+            "search_engines": {
+                "lexical": store.lexical_engine().name,
+                "vector": store.vector_engine().name,
+            },
             "llm_provider_configured": config.llm_provider or "auto",
             "claude_cli_available": ClaudeCodeProvider.available(config.claude_bin),
         }, ensure_ascii=False, indent=2)

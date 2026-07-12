@@ -32,14 +32,19 @@ answer:
 - **Rules are self-verified on insert.** A rule convention must mechanically
   flag its own `bad_example` and pass its own `good_example`, or the store
   rejects it. You cannot store a convention that can't be demonstrated.
-- **Retrieval is a deterministic hybrid search engine.** No embedding model:
-  a BM25 inverted index handles text queries (identifiers split on
-  snake_case/camelCase), AST fingerprints — feature-hashed structural vectors
-  (node-type unigrams + parent>child bigrams, identifiers excluded) — handle
-  "code that looks like this", and metadata (language/framework/category/tags)
-  hard-filters. Signals blend as 0.45·AST + 0.35·BM25 + 0.20·metadata
-  (renormalized over the signals present); same corpus + same query = same
-  ranking, always.
+- **Retrieval is a deterministic hybrid search engine on leading OSS.**
+  Text queries run BM25 on [Tantivy](https://github.com/quickwit-oss/tantivy)
+  (the Rust successor to Lucene; identifiers split on snake_case/camelCase),
+  and AST fingerprints — feature-hashed structural vectors (node-type
+  unigrams + parent>child bigrams, identifiers excluded; no embedding
+  model) — run exact cosine search on
+  [FAISS](https://github.com/facebookresearch/faiss) (`IndexFlatIP`).
+  Metadata (language/framework/category/tags) hard-filters. Signals blend as
+  0.45·AST + 0.35·BM25 + 0.20·metadata (renormalized over the signals
+  present). Both engines are exact, so determinism holds: same corpus + same
+  query = same ranking, always. Zero-dependency builtin fallbacks (own BM25 +
+  Python cosine) engage automatically when the engines aren't installed;
+  pin with `ACODE_LEXICAL_ENGINE` / `ACODE_VECTOR_ENGINE`.
 - **The LLM only synthesizes.** Generated code is mechanically verified; on
   violations a bounded repair loop feeds the exact violations back. Review
   responses embed the mechanical report — trust `verified`, not prose.
@@ -51,6 +56,7 @@ answer:
 
 ```bash
 pip install -e .            # core (tree-sitter, MCP, python/js/ts grammars)
+pip install -e '.[search]'  # + Tantivy (BM25) & FAISS (vector) engines (recommended)
 pip install -e '.[adk]'     # + Google ADK orchestration (recommended)
 pip install -e '.[langs]'   # + go, java, rust grammars
 pip install -e '.[litellm]' # + litellm (100+ providers)

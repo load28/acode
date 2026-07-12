@@ -19,6 +19,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+search = ["tantivy>=0.24", "faiss-cpu>=1.9", "numpy>=1.26"]
 adk = ["google-adk>=2.0"]
 litellm = ["litellm>=1.60"]
 langs = ["tree-sitter-go>=0.23", "tree-sitter-java>=0.23", "tree-sitter-rust>=0.23"]
