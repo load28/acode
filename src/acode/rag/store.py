@@ -11,12 +11,12 @@ Entries come in two kinds:
              codebase) used purely for retrieval, so generated code can
              be steered toward the user's existing shape.
 
-Retrieval is deterministic:
+Retrieval is a deterministic hybrid search engine:
     1. hard filter on language / kind / metadata (SQL + JSON match)
-    2. rank by cosine similarity between the query code's AST
-       fingerprint and each entry's stored fingerprint; without query
-       code, rank by metadata overlap. Ties break on id, so the same
-       query always returns the same list in the same order.
+    2. rank by combining up to three signals — BM25 over a text query
+       (inverted index, see textindex.py), AST-fingerprint cosine
+       against query code, and metadata overlap. Ties break on id, so
+       the same query always returns the same list in the same order.
 
 Storage is a single SQLite file — no external services.
 """
@@ -34,6 +34,7 @@ from typing import Any
 from ..astcore.fingerprint import DIM, cosine, fingerprint_code
 from ..astcore.parser import normalize_language
 from ..astcore.rules import Rule, RuleEngine, RuleError, validate_rule
+from .textindex import BM25Index, document_text
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS conventions (
@@ -166,9 +167,21 @@ class ConventionStore:
         self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
         self._conn.executescript(_SCHEMA)
         self._engine = RuleEngine()
+        self._text_index: BM25Index | None = None  # rebuilt lazily on writes
 
     def close(self) -> None:
         self._conn.close()
+
+    def _invalidate_index(self) -> None:
+        self._text_index = None
+
+    def text_index(self) -> BM25Index:
+        """The BM25 inverted index over all conventions (built lazily)."""
+        if self._text_index is None:
+            self._text_index = BM25Index.build(
+                (conv.id, document_text(conv)) for conv in self.list()
+            )
+        return self._text_index
 
     # ------------------------------------------------------------- write
 
@@ -212,6 +225,7 @@ class ConventionStore:
         except sqlite3.IntegrityError as exc:
             raise ValueError(f"convention {convention.id!r} already exists") from exc
         self._conn.commit()
+        self._invalidate_index()
         return convention
 
     def _self_verify(self, convention: Convention) -> None:
@@ -237,6 +251,7 @@ class ConventionStore:
     def delete(self, convention_id: str) -> bool:
         cur = self._conn.execute("DELETE FROM conventions WHERE id = ?", (convention_id,))
         self._conn.commit()
+        self._invalidate_index()
         return cur.rowcount > 0
 
     # -------------------------------------------------------------- read
@@ -288,17 +303,23 @@ class ConventionStore:
         language: str,
         metadata: dict[str, Any] | None = None,
         code: str | None = None,
+        query: str | None = None,
         kind: str | None = None,
         top_k: int = 8,
         min_similarity: float = 0.0,
     ) -> list[SearchHit]:
-        """Metadata-filtered, AST-similarity-ranked retrieval.
+        """Hybrid retrieval: hard metadata filter, then a weighted blend
+        of the available ranking signals —
 
-        With ``code``: rank = 0.7 * AST cosine + 0.3 * metadata overlap
-        (modification path — find conventions whose examples look like
-        the code being edited).
-        Without ``code``: rank = metadata overlap (generation path).
-        Deterministic: ties break on convention id.
+            query (text)  BM25 over the inverted index      weight 0.35
+            code (AST)    fingerprint cosine similarity     weight 0.45
+            metadata      soft overlap score                weight 0.20
+
+        Weights renormalize over the signals actually provided (e.g.
+        text-only search ranks 0.64 * bm25 + 0.36 * metadata). With a
+        text query and no code, entries with zero lexical match are
+        dropped, like a search engine. Deterministic: same corpus +
+        same query = same order (ties break on id).
         """
         language = normalize_language(language)
         metadata = metadata or {}
@@ -308,18 +329,39 @@ class ConventionStore:
         ]
 
         query_fp = fingerprint_code(code, language) if code else None
+        text_scores = self.text_index().normalized_scores(query) if query else None
+
+        weights: dict[str, float] = {"meta": 0.20}
+        if query_fp is not None:
+            weights["ast"] = 0.45
+        if text_scores is not None:
+            weights["text"] = 0.35
+        total_weight = sum(weights.values())
+
         hits: list[SearchHit] = []
         for conv in candidates:
-            meta_score = _metadata_overlap(conv.metadata, metadata)
-            if query_fp is not None and conv.fingerprint and len(conv.fingerprint) == DIM:
-                ast_score = max(0.0, cosine(query_fp, conv.fingerprint))
+            parts: dict[str, float] = {
+                "meta": _metadata_overlap(conv.metadata, metadata)
+            }
+            if query_fp is not None:
+                if conv.fingerprint and len(conv.fingerprint) == DIM:
+                    ast_score = max(0.0, cosine(query_fp, conv.fingerprint))
+                else:
+                    ast_score = 0.0
                 if ast_score < min_similarity:
                     continue
-                score = 0.7 * ast_score + 0.3 * meta_score
-                reason = f"ast_similarity={ast_score:.3f}, metadata_overlap={meta_score:.2f}"
-            else:
-                score = meta_score
-                reason = f"metadata_overlap={meta_score:.2f}"
+                parts["ast"] = ast_score
+            if text_scores is not None:
+                parts["text"] = text_scores.get(conv.id, 0.0)
+                if parts["text"] == 0.0 and query_fp is None:
+                    continue  # pure text search: no lexical match, no hit
+            score = sum(weights[k] * parts[k] for k in weights) / total_weight
+            reason = ", ".join(
+                f"{name}={parts[k]:.3f}" for k, name in (
+                    ("text", "bm25"), ("ast", "ast_similarity"),
+                    ("meta", "metadata_overlap"))
+                if k in parts
+            )
             hits.append(SearchHit(convention=conv, score=score, reason=reason))
 
         hits.sort(key=lambda h: (-h.score, h.convention.id))

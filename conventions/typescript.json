@@ -54,6 +54,52 @@
     "bad_example": "function parse(input: any): number {\n  return Number(input);\n}\n"
   },
   {
+    "id": "ts-no-ts-ignore",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No @ts-ignore",
+    "guideline": "Never silence the type checker with @ts-ignore; fix the type or use @ts-expect-error with a reason.",
+    "metadata": {"category": "types", "tags": ["typescript", "strict"]},
+    "rule": {
+      "id": "ts-no-ts-ignore",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "((comment) @c (#match? @c \"@ts-ignore\"))",
+      "capture": "c",
+      "message": "@ts-ignore is forbidden; fix the type error properly"
+    },
+    "good_example": "const port: number = Number(process.env.PORT ?? 3000);\n",
+    "bad_example": "// @ts-ignore\nconst port: number = process.env.PORT;\n"
+  },
+  {
+    "id": "ts-func-camel-case",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "Functions are camelCase",
+    "guideline": "Function names use camelCase.",
+    "metadata": {"category": "naming", "tags": ["naming"]},
+    "rule": {
+      "id": "ts-func-camel-case",
+      "language": "typescript",
+      "type": "naming",
+      "query": "(function_declaration name: (identifier) @name)",
+      "capture": "name",
+      "regex": "[a-z][A-Za-z0-9]*",
+      "message": "function names must be camelCase"
+    },
+    "good_example": "function loadUser(id: number): string {\n  return String(id);\n}\n",
+    "bad_example": "function load_user(id: number): string {\n  return String(id);\n}\n"
+  },
+  {
+    "id": "ts-pattern-result-type",
+    "kind": "pattern",
+    "language": "typescript",
+    "title": "Result union for fallible operations",
+    "guideline": "Fallible functions return a discriminated Result union instead of throwing.",
+    "metadata": {"category": "errors", "tags": ["errors", "typescript"]},
+    "good_example": "type Result<T> =\n  | { ok: true; value: T }\n  | { ok: false; error: string };\n\nexport function parsePort(input: string): Result<number> {\n  const port = Number(input);\n  if (!Number.isInteger(port) || port <= 0) {\n    return { ok: false, error: `invalid port: ${input}` };\n  }\n  return { ok: true, value: port };\n}\n"
+  },
+  {
     "id": "ts-interface-pascal-case",
     "kind": "rule",
     "language": "typescript",

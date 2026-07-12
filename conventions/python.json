@@ -75,6 +75,79 @@
     "bad_example": "def add(a, b):\n    return a + b\n"
   },
   {
+    "id": "py-no-eval",
+    "kind": "rule",
+    "language": "python",
+    "title": "No eval()/exec()",
+    "guideline": "Dynamic code execution via eval/exec is forbidden; use explicit dispatch instead.",
+    "metadata": {"category": "security", "tags": ["security"]},
+    "rule": {
+      "id": "py-no-eval",
+      "language": "python",
+      "type": "forbid",
+      "query": "(call function: (identifier) @fn (#any-of? @fn \"eval\" \"exec\"))",
+      "capture": "fn",
+      "message": "eval()/exec() is forbidden; use explicit dispatch"
+    },
+    "good_example": "handlers = {\"add\": lambda a, b: a + b}\nresult = handlers[\"add\"](1, 2)\n",
+    "bad_example": "result = eval(\"1 + 2\")\n"
+  },
+  {
+    "id": "py-class-pascal-case",
+    "kind": "rule",
+    "language": "python",
+    "title": "Class names are PascalCase",
+    "guideline": "All class names use PascalCase.",
+    "metadata": {"category": "naming", "tags": ["naming", "pep8"]},
+    "rule": {
+      "id": "py-class-pascal-case",
+      "language": "python",
+      "type": "naming",
+      "query": "(class_definition name: (identifier) @name)",
+      "capture": "name",
+      "regex": "[A-Z][A-Za-z0-9]*",
+      "message": "class names must be PascalCase"
+    },
+    "good_example": "class UserService:\n    \"\"\"Service.\"\"\"\n",
+    "bad_example": "class user_service:\n    pass\n"
+  },
+  {
+    "id": "py-no-bare-except",
+    "kind": "rule",
+    "language": "python",
+    "title": "No bare except",
+    "guideline": "Always catch a specific exception type; a bare `except:` swallows KeyboardInterrupt and SystemExit.",
+    "metadata": {"category": "correctness", "tags": ["bugs", "errors"]},
+    "rule": {
+      "id": "py-no-bare-except",
+      "language": "python",
+      "type": "forbid",
+      "query": "(except_clause . (block)) @bad",
+      "capture": "bad",
+      "message": "bare except is forbidden; catch a specific exception type"
+    },
+    "good_example": "try:\n    load()\nexcept ValueError:\n    handle()\n",
+    "bad_example": "try:\n    load()\nexcept:\n    pass\n"
+  },
+  {
+    "id": "py-pattern-pytest-test",
+    "kind": "pattern",
+    "language": "python",
+    "title": "pytest test function shape",
+    "guideline": "Tests are plain functions with arrange/act/assert, using fixtures as parameters.",
+    "metadata": {"framework": "pytest", "category": "testing", "tags": ["pytest", "testing"]},
+    "good_example": "def test_load_user_returns_profile(store):\n    \"\"\"Loading an existing user yields its profile.\"\"\"\n    store.add(make_user(id=7))\n    profile = load_user(store, 7)\n    assert profile.id == 7\n"
+  },
+  {
+    "id": "py-pattern-dataclass-model",
+    "kind": "pattern",
+    "language": "python",
+    "title": "dataclass model shape",
+    "guideline": "Plain data carriers are frozen dataclasses with typed fields and a to_dict helper.",
+    "metadata": {"category": "modeling", "tags": ["dataclass"]},
+    "good_example": "@dataclass(frozen=True)\nclass UserProfile:\n    \"\"\"Immutable user profile.\"\"\"\n    id: int\n    name: str\n\n    def to_dict(self) -> dict:\n        \"\"\"Serialize for transport.\"\"\"\n        return {\"id\": self.id, \"name\": self.name}\n"
+  },
+  {
     "id": "py-pattern-fastapi-route",
     "kind": "pattern",
     "language": "python",

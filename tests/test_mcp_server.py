@@ -60,17 +60,17 @@ class TestMcpTools:
 
     async def test_add_convention_self_verifies(self, server):
         result = await _call(server, "add_convention", {
-            "id": "py-no-eval", "language": "python", "title": "no eval",
+            "id": "py-no-compile", "language": "python", "title": "no compile",
             "kind": "rule", "rule_type": "forbid",
-            "query": '(call function: (identifier) @fn (#eq? @fn "eval"))',
-            "message": "eval is forbidden",
-            "bad_example": "eval('1+1')\n",
+            "query": '(call function: (identifier) @fn (#eq? @fn "compile"))',
+            "message": "compile() is forbidden",
+            "bad_example": "compile('1+1', '<s>', 'eval')\n",
             "good_example": "x = 1 + 1\n",
         })
-        assert result["added"] == "py-no-eval"
+        assert result["added"] == "py-no-compile"
         check = await _call(server, "check_code", {
-            "language": "python", "code": "eval('2')\n"})
-        assert any(v["rule_id"] == "py-no-eval" for v in check["violations"])
+            "language": "python", "code": "compile('2', '<s>', 'eval')\n"})
+        assert any(v["rule_id"] == "py-no-compile" for v in check["violations"])
 
     async def test_add_broken_convention_rejected(self, server):
         with pytest.raises(Exception, match="does not flag"):

@@ -32,11 +32,14 @@ answer:
 - **Rules are self-verified on insert.** A rule convention must mechanically
   flag its own `bad_example` and pass its own `good_example`, or the store
   rejects it. You cannot store a convention that can't be demonstrated.
-- **Retrieval is deterministic too.** No embedding model: AST fingerprints
-  are feature-hashed structural vectors (node-type unigrams + parent>child
-  bigrams, identifiers excluded). Generation retrieves by metadata
-  (language/framework/category/tags); modification additionally ranks by AST
-  similarity to the code being edited, so the closest existing patterns win.
+- **Retrieval is a deterministic hybrid search engine.** No embedding model:
+  a BM25 inverted index handles text queries (identifiers split on
+  snake_case/camelCase), AST fingerprints — feature-hashed structural vectors
+  (node-type unigrams + parent>child bigrams, identifiers excluded) — handle
+  "code that looks like this", and metadata (language/framework/category/tags)
+  hard-filters. Signals blend as 0.45·AST + 0.35·BM25 + 0.20·metadata
+  (renormalized over the signals present); same corpus + same query = same
+  ranking, always.
 - **The LLM only synthesizes.** Generated code is mechanically verified; on
   violations a bounded repair loop feeds the exact violations back. Review
   responses embed the mechanical report — trust `verified`, not prose.
@@ -56,15 +59,22 @@ pip install -e '.[litellm]' # + litellm (100+ providers)
 ## Quick start
 
 ```bash
-# 1. load conventions (executable rules; self-verified on insert)
-acode import conventions/python.json conventions/typescript.json
+# 1. build the corpus: curated conventions + your codebase's own patterns
+acode corpus build --index ./src
 
-# 2. index your codebase so retrieval prefers your own patterns
-acode index ./src
+# 2. inspect what went in / try the search engine
+acode corpus stats
+acode search --language python --query "logging print forbidden"
+acode search --language python --code-file some/route.py   # rank by AST shape
 
 # 3. register the MCP server with Claude Code
 claude mcp add acode -- acode serve
 ```
+
+The convention JSON files in `conventions/` are the corpus's source of truth;
+the SQLite database is a build artifact — rerun `acode corpus build` any time
+the corpus sources change. (`acode import` / `acode index` also update an
+existing database incrementally.)
 
 Then from Claude Code (or any MCP client):
 

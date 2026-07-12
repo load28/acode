@@ -78,6 +78,7 @@ def build_server(config: AcodeConfig | None = None,
     @mcp.tool()
     def search_conventions(
         language: str,
+        query: str | None = None,
         code: str | None = None,
         framework: str | None = None,
         category: str | None = None,
@@ -85,14 +86,15 @@ def build_server(config: AcodeConfig | None = None,
         kind: str | None = None,
         top_k: int = 8,
     ) -> str:
-        """Search stored conventions. Deterministic: hard metadata filter,
-        then AST-fingerprint similarity ranking when `code` is given (use
-        this when modifying existing code so the closest patterns rank
-        first)."""
+        """Hybrid convention search. Deterministic: hard metadata filter,
+        then a weighted blend of BM25 (`query` keywords), AST-fingerprint
+        similarity (`code` — pass the code being modified so the closest
+        patterns rank first), and metadata overlap."""
         hits = store.search(
             language=language,
             metadata=_metadata_from(framework, category, tags),
             code=code,
+            query=query,
             kind=kind,
             top_k=top_k,
         )

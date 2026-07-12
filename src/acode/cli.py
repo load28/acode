@@ -5,8 +5,10 @@
     acode export                         dump all conventions as JSON
     acode list [--language L]            list conventions
     acode check <file> [--language L]    mechanical rule check
-    acode search --language L [...]      deterministic RAG search
+    acode search --language L [...]      hybrid RAG search (BM25+AST+metadata)
     acode index <path> [--language L]    index a codebase as patterns
+    acode corpus build [...]             (re)build the corpus database
+    acode corpus stats                   corpus composition and index stats
 """
 
 from __future__ import annotations
@@ -44,13 +46,26 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("file")
     p.add_argument("--language")
 
-    p = sub.add_parser("search", help="search conventions")
+    p = sub.add_parser("search", help="hybrid search (BM25 + AST + metadata)")
     p.add_argument("--language", required=True)
+    p.add_argument("--query", help="keyword/natural-language query (BM25)")
     p.add_argument("--code-file", help="rank by AST similarity to this file")
     p.add_argument("--framework")
     p.add_argument("--category")
     p.add_argument("--tag", action="append", dest="tags")
     p.add_argument("--top-k", type=int, default=8)
+
+    p = sub.add_parser("corpus", help="corpus lifecycle")
+    corpus_sub = p.add_subparsers(dest="corpus_command", required=True)
+    pb = corpus_sub.add_parser("build", help="(re)build the corpus database")
+    pb.add_argument("--conventions-dir", default="conventions",
+                    help="directory of convention *.json files (default: conventions)")
+    pb.add_argument("--index", action="append", dest="index_paths", default=[],
+                    help="source path to index as patterns (repeatable)")
+    pb.add_argument("--keep", action="store_true",
+                    help="update the existing DB instead of rebuilding fresh")
+    pb.add_argument("--max-files", type=int, default=500)
+    corpus_sub.add_parser("stats", help="corpus composition and index stats")
 
     p = sub.add_parser("index", help="index a codebase as pattern conventions")
     p.add_argument("path")
@@ -68,7 +83,28 @@ def main(argv: list[str] | None = None) -> int:
         build_server(config).run()
         return 0
 
+    if args.command == "corpus" and args.corpus_command == "build":
+        from .rag.corpus import build_corpus
+
+        report = build_corpus(
+            config.db_path,
+            conventions_dir=args.conventions_dir,
+            index_paths=args.index_paths,
+            fresh=not args.keep,
+            max_files=args.max_files,
+        )
+        json.dump(report, sys.stdout, ensure_ascii=False, indent=2)
+        print()
+        return 1 if report["errors"] else 0
+
     store = ConventionStore(config.db_path)
+
+    if args.command == "corpus" and args.corpus_command == "stats":
+        from .rag.corpus import corpus_stats
+
+        json.dump(corpus_stats(store), sys.stdout, ensure_ascii=False, indent=2)
+        print()
+        return 0
 
     if args.command == "import":
         for path in args.files:
@@ -108,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
             metadata["tags"] = args.tags
         code = Path(args.code_file).read_text(encoding="utf-8") if args.code_file else None
         hits = store.search(language=args.language, metadata=metadata,
-                            code=code, top_k=args.top_k)
+                            code=code, query=args.query, top_k=args.top_k)
         json.dump([h.to_dict() for h in hits], sys.stdout, ensure_ascii=False, indent=2)
         print()
         return 0

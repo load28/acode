@@ -1,0 +1,65 @@
+[
+  {
+    "id": "js-no-var",
+    "kind": "rule",
+    "language": "javascript",
+    "title": "No var declarations",
+    "guideline": "Use const (or let when reassignment is required); var is forbidden.",
+    "metadata": {"category": "correctness", "tags": ["es6"]},
+    "rule": {
+      "id": "js-no-var",
+      "language": "javascript",
+      "type": "forbid",
+      "query": "(variable_declaration) @bad",
+      "capture": "bad",
+      "message": "var is forbidden; use const or let"
+    },
+    "good_example": "const total = 1;\nlet count = 0;\ncount += total;\n",
+    "bad_example": "var total = 1;\n"
+  },
+  {
+    "id": "js-strict-equality",
+    "kind": "rule",
+    "language": "javascript",
+    "title": "Use strict equality",
+    "guideline": "Always compare with === / !==; loose equality coerces types.",
+    "metadata": {"category": "correctness", "tags": ["bugs"]},
+    "rule": {
+      "id": "js-strict-equality",
+      "language": "javascript",
+      "type": "forbid",
+      "query": "(binary_expression operator: [\"==\" \"!=\"] @op)",
+      "capture": "op",
+      "message": "loose equality (==, !=) is forbidden; use === / !=="
+    },
+    "good_example": "if (a === b) {\n  run();\n}\n",
+    "bad_example": "if (a == b) {\n  run();\n}\n"
+  },
+  {
+    "id": "js-no-console",
+    "kind": "rule",
+    "language": "javascript",
+    "title": "No console.* in application code",
+    "guideline": "Use the shared logger module instead of console.*.",
+    "metadata": {"category": "logging", "tags": ["logging"]},
+    "rule": {
+      "id": "js-no-console",
+      "language": "javascript",
+      "type": "forbid",
+      "query": "(call_expression function: (member_expression object: (identifier) @obj) (#eq? @obj \"console\"))",
+      "capture": "obj",
+      "message": "console.* is forbidden; use the logger module"
+    },
+    "good_example": "const { logger } = require(\"./logger\");\nlogger.info(\"ready\");\n",
+    "bad_example": "console.log(\"ready\");\n"
+  },
+  {
+    "id": "js-pattern-express-route",
+    "kind": "pattern",
+    "language": "javascript",
+    "title": "Express route handler shape",
+    "guideline": "Route handlers are async, delegate to a service, and forward errors to next().",
+    "metadata": {"framework": "express", "category": "api", "tags": ["express", "http"]},
+    "good_example": "router.get(\"/users/:id\", async (req, res, next) => {\n  try {\n    const user = await users.getById(req.params.id);\n    if (!user) {\n      return res.status(404).json({ error: \"user not found\" });\n    }\n    return res.json(user);\n  } catch (err) {\n    return next(err);\n  }\n});\n"
+  }
+]
