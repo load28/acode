@@ -1,0 +1,75 @@
+[
+  {
+    "id": "ts-no-var",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No var declarations",
+    "guideline": "Use const (or let when reassignment is required); var is forbidden.",
+    "metadata": {"category": "correctness", "tags": ["es6"]},
+    "rule": {
+      "id": "ts-no-var",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "(variable_declaration) @bad",
+      "capture": "bad",
+      "message": "var is forbidden; use const or let"
+    },
+    "good_example": "const total = 1;\nlet count = 0;\ncount += total;\n",
+    "bad_example": "var total = 1;\n"
+  },
+  {
+    "id": "ts-no-console-log",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No console.* in application code",
+    "guideline": "Use the shared logger module instead of console.*.",
+    "metadata": {"category": "logging", "tags": ["logging"]},
+    "rule": {
+      "id": "ts-no-console-log",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "(call_expression function: (member_expression object: (identifier) @obj) (#eq? @obj \"console\"))",
+      "capture": "obj",
+      "message": "console.* is forbidden; use the logger module"
+    },
+    "good_example": "import { logger } from \"./logger\";\nlogger.info(\"ready\");\n",
+    "bad_example": "console.log(\"ready\");\n"
+  },
+  {
+    "id": "ts-no-any",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No explicit any",
+    "guideline": "Type everything explicitly; use unknown + narrowing instead of any.",
+    "metadata": {"category": "types", "tags": ["typescript", "strict"]},
+    "rule": {
+      "id": "ts-no-any",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "((predefined_type) @t (#eq? @t \"any\"))",
+      "capture": "t",
+      "message": "explicit any is forbidden; use unknown or a precise type"
+    },
+    "good_example": "function parse(input: unknown): number {\n  return Number(input);\n}\n",
+    "bad_example": "function parse(input: any): number {\n  return Number(input);\n}\n"
+  },
+  {
+    "id": "ts-interface-pascal-case",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "Interfaces are PascalCase",
+    "guideline": "Interface names use PascalCase without an I- prefix.",
+    "metadata": {"category": "naming", "tags": ["naming"]},
+    "rule": {
+      "id": "ts-interface-pascal-case",
+      "language": "typescript",
+      "type": "naming",
+      "query": "(interface_declaration name: (type_identifier) @name)",
+      "capture": "name",
+      "regex": "[A-Z][A-Za-z0-9]*",
+      "message": "interface names must be PascalCase"
+    },
+    "good_example": "interface UserProfile {\n  id: number;\n  name: string;\n}\n",
+    "bad_example": "interface user_profile {\n  id: number;\n  name: string;\n}\n"
+  }
+]
