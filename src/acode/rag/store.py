@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any
 
 from ..astcore.fingerprint import DIM, fingerprint_code
-from ..astcore.parser import normalize_language
+from ..astcore.parser import normalize_language, rule_languages
 from ..astcore.rules import Rule, RuleEngine, RuleError, validate_rule
 from .engines import (
     LexicalEngine,
@@ -302,8 +302,10 @@ class ConventionStore:
         )
         params: list[Any] = []
         if language:
-            sql += " AND language = ?"
-            params.append(normalize_language(language))
+            # a dialect (tsx) also inherits its base language's conventions
+            langs = rule_languages(language)
+            sql += f" AND language IN ({', '.join('?' * len(langs))})"
+            params.extend(langs)
         if kind:
             sql += " AND kind = ?"
             params.append(kind)

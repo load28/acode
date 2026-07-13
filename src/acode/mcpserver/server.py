@@ -113,6 +113,11 @@ def build_server(config: AcodeConfig | None = None,
         AST engine. No LLM is involved: the verdict is deterministic and
         reproducible. Returns syntax status and rule violations with
         line/column positions."""
+        from ..astcore.parser import resolve_dialect
+
+        # JSX code declared as "typescript" is checked as tsx; tsx inherits
+        # the typescript ruleset (dialect rules may override base rules)
+        language = resolve_dialect(code, language)
         if convention_ids:
             rules = []
             for cid in convention_ids:

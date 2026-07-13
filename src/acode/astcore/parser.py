@@ -33,6 +33,18 @@ _ALIASES = {
     "rs": "rust",
 }
 
+# dialect -> base language whose rules also apply when checking the dialect.
+# tsx is a superset grammar of typescript (minus `<T>expr` type assertions),
+# so typescript rules are inherited by tsx files. javascript's grammar parses
+# JSX natively, so no dialect entry is needed for it.
+_DIALECT_BASE = {
+    "tsx": "typescript",
+}
+
+# base language -> dialect to retry with when code fails to parse as the base
+# (e.g. JSX inside a file declared as "typescript").
+_DIALECT_UPGRADE = {base: dialect for dialect, base in _DIALECT_BASE.items()}
+
 _EXTENSIONS = {
     ".py": "python",
     ".js": "javascript",
@@ -99,6 +111,34 @@ def get_language(name: str) -> Language:
             f"(pip install {module_name.replace('_', '-')})"
         ) from exc
     return Language(getattr(module, attr)())
+
+
+def rule_languages(language: str) -> tuple[str, ...]:
+    """Languages whose rules apply when checking ``language``.
+
+    For a dialect this is (dialect, base); for everything else (language,).
+    """
+    key = normalize_language(language)
+    base = _DIALECT_BASE.get(key)
+    return (key, base) if base else (key,)
+
+
+def resolve_dialect(code: str | bytes, language: str) -> str:
+    """Deterministically pick the grammar for ``code``.
+
+    If the code fails to parse as ``language`` but parses cleanly as its
+    upgrade dialect (typescript -> tsx), return the dialect. Pure function
+    of (code, language), so verdicts stay reproducible.
+    """
+    key = normalize_language(language)
+    dialect = _DIALECT_UPGRADE.get(key)
+    if dialect is None:
+        return key
+    if not parse(code, key).root_node.has_error:
+        return key
+    if not parse(code, dialect).root_node.has_error:
+        return dialect
+    return key
 
 
 def parse(code: str | bytes, language: str) -> Tree:

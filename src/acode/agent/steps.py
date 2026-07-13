@@ -12,8 +12,9 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ..astcore.parser import normalize_language, rule_languages
 from ..astcore.rules import CheckReport, Rule, RuleEngine
-from ..rag.store import ConventionStore, SearchHit
+from ..rag.store import Convention, ConventionStore, SearchHit
 
 _ENGINE = RuleEngine()
 
@@ -39,28 +40,44 @@ def retrieve(
     )
 
 
+def _drop_overridden(conventions: list[Convention], language: str) -> list[Convention]:
+    """A dialect rule replaces the base-language rule named in its
+    metadata['overrides'] (e.g. tsx naming rule overriding ts-func-camel-case)."""
+    overridden = {
+        conv.metadata.get("overrides")
+        for conv in conventions
+        if conv.language == language and conv.metadata.get("overrides")
+    }
+    return [conv for conv in conventions if conv.id not in overridden]
+
+
 def rules_from_hits(hits: list[SearchHit], language: str) -> list[Rule]:
-    rules = []
-    for hit in hits:
-        conv = hit.convention
-        if conv.kind == "rule" and conv.rule is not None and conv.language == language:
-            rules.append(conv.rule)
-    return rules
+    language = normalize_language(language)
+    langs = rule_languages(language)
+    conventions = [
+        hit.convention for hit in hits
+        if hit.convention.kind == "rule"
+        and hit.convention.rule is not None
+        and hit.convention.language in langs
+    ]
+    return [conv.rule for conv in _drop_overridden(conventions, language)]
 
 
 def applicable_rules(store: ConventionStore, language: str,
                      metadata: dict[str, Any] | None) -> list[Rule]:
-    """All stored rules for a language that pass the metadata filter."""
+    """All stored rules for a language (dialects inherit their base
+    language's rules) that pass the metadata filter."""
     from ..rag.store import _metadata_matches
 
-    rules = []
-    for conv in store.list(language=language, kind="rule"):
-        if conv.rule is None:
-            continue
-        if metadata and not _metadata_matches(conv.metadata, metadata):
-            continue
-        rules.append(conv.rule)
-    return rules
+    conventions = [
+        conv for conv in store.list(language=language, kind="rule")
+        if conv.rule is not None
+        and (not metadata or _metadata_matches(conv.metadata, metadata))
+    ]
+    return [
+        conv.rule
+        for conv in _drop_overridden(conventions, normalize_language(language))
+    ]
 
 
 def check(code: str, language: str, rules: list[Rule]) -> CheckReport:

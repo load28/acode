@@ -1,0 +1,75 @@
+[
+  {
+    "id": "tsx-func-component-naming",
+    "kind": "rule",
+    "language": "tsx",
+    "title": "Functions are camelCase, components PascalCase",
+    "guideline": "In tsx files a function is either a camelCase helper or a PascalCase React component; snake_case and other casings are forbidden. Overrides ts-func-camel-case, which would flag every component.",
+    "metadata": {"category": "naming", "tags": ["naming", "react"], "overrides": "ts-func-camel-case"},
+    "rule": {
+      "id": "tsx-func-component-naming",
+      "language": "tsx",
+      "type": "naming",
+      "query": "(function_declaration name: (identifier) @name)",
+      "capture": "name",
+      "regex": "[a-zA-Z][a-zA-Z0-9]*",
+      "message": "function names must be camelCase (helpers) or PascalCase (components)"
+    },
+    "good_example": "function formatId(id: number): string {\n  return String(id).padStart(3, \"0\");\n}\n\nexport function PokemonCard({ name }: { name: string }) {\n  return <article className=\"card\">{name}</article>;\n}\n",
+    "bad_example": "export function pokemon_card({ name }: { name: string }) {\n  return <article className=\"card\">{name}</article>;\n}\n"
+  },
+  {
+    "id": "tsx-no-dangerously-set-inner-html",
+    "kind": "rule",
+    "language": "tsx",
+    "title": "No dangerouslySetInnerHTML",
+    "guideline": "Never inject raw HTML with dangerouslySetInnerHTML (XSS risk); render data as JSX children or sanitize upstream.",
+    "metadata": {"category": "security", "tags": ["react", "xss", "security"]},
+    "rule": {
+      "id": "tsx-no-dangerously-set-inner-html",
+      "language": "tsx",
+      "type": "forbid",
+      "query": "(jsx_attribute (property_identifier) @attr (#eq? @attr \"dangerouslySetInnerHTML\"))",
+      "capture": "attr",
+      "message": "dangerouslySetInnerHTML is forbidden (XSS risk); render content as JSX children"
+    },
+    "good_example": "export function Notice({ text }: { text: string }) {\n  return <p className=\"notice\">{text}</p>;\n}\n",
+    "bad_example": "export function Notice({ html }: { html: string }) {\n  return <p dangerouslySetInnerHTML={{ __html: html }} />;\n}\n"
+  },
+  {
+    "id": "tsx-no-inline-style",
+    "kind": "rule",
+    "language": "tsx",
+    "title": "No inline style attribute",
+    "guideline": "Style via className and CSS files, not the style={...} attribute, so styling stays cacheable and themeable.",
+    "metadata": {"category": "styling", "tags": ["react", "css"]},
+    "rule": {
+      "id": "tsx-no-inline-style",
+      "language": "tsx",
+      "type": "forbid",
+      "query": "(jsx_attribute (property_identifier) @attr (#eq? @attr \"style\"))",
+      "capture": "attr",
+      "message": "inline style={...} is forbidden; use className with a CSS file"
+    },
+    "good_example": "export function Badge({ label }: { label: string }) {\n  return <span className=\"badge badge--fire\">{label}</span>;\n}\n",
+    "bad_example": "export function Badge({ label }: { label: string }) {\n  return <span style={{ backgroundColor: \"#EE8130\" }}>{label}</span>;\n}\n"
+  },
+  {
+    "id": "tsx-no-react-fc",
+    "kind": "rule",
+    "language": "tsx",
+    "title": "No React.FC",
+    "guideline": "Type props directly on the function parameters instead of annotating components as React.FC (implicit children, worse generics).",
+    "metadata": {"category": "types", "tags": ["react", "typescript"]},
+    "rule": {
+      "id": "tsx-no-react-fc",
+      "language": "tsx",
+      "type": "forbid",
+      "query": "((nested_type_identifier module: (identifier) @mod name: (type_identifier) @fc) @bad (#eq? @mod \"React\") (#eq? @fc \"FC\"))",
+      "capture": "bad",
+      "message": "React.FC is forbidden; type the props parameter directly"
+    },
+    "good_example": "interface CardProps {\n  title: string;\n}\n\nexport function Card({ title }: CardProps) {\n  return <div className=\"card\">{title}</div>;\n}\n",
+    "bad_example": "interface CardProps {\n  title: string;\n}\n\nexport const Card: React.FC<CardProps> = ({ title }) => {\n  return <div className=\"card\">{title}</div>;\n};\n"
+  }
+]

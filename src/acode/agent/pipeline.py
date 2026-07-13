@@ -26,7 +26,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..astcore.parser import normalize_language
+from ..astcore.parser import normalize_language, resolve_dialect
 from ..astcore.rules import CheckReport
 from ..config import AcodeConfig
 from ..llm.base import LlmProvider
@@ -209,7 +209,8 @@ class CodingPipeline:
         metadata: dict[str, Any] | None = None,
         instruction: str | None = None,
     ) -> ReviewResult:
-        language = normalize_language(language)
+        # the code may be a dialect of the declared language (JSX in "typescript")
+        language = resolve_dialect(code, language)
         provider = self._require_provider()
         trace: list[dict[str, Any]] = []
 

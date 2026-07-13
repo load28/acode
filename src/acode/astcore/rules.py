@@ -27,7 +27,7 @@ from typing import Any
 
 from tree_sitter import Node, Query, QueryCursor, QueryError
 
-from .parser import get_language, parse
+from .parser import get_language, parse, resolve_dialect, rule_languages
 
 RULE_TYPES = ("forbid", "require", "require_in", "naming")
 
@@ -106,6 +106,9 @@ class CheckReport:
     syntax_ok: bool
     checked_rules: list[str] = field(default_factory=list)
     violations: list[RuleViolation] = field(default_factory=list)
+    # rules whose query does not compile under the dialect grammar actually
+    # used for the check — reported instead of silently dropped
+    skipped_rules: list[str] = field(default_factory=list)
 
     @property
     def passed(self) -> bool:
@@ -117,6 +120,7 @@ class CheckReport:
             "syntax_ok": self.syntax_ok,
             "passed": self.passed,
             "checked_rules": self.checked_rules,
+            "skipped_rules": self.skipped_rules,
             "violations": [v.to_dict() for v in self.violations],
         }
 
@@ -190,23 +194,33 @@ class RuleEngine:
     """Executes rules against source code. Pure, deterministic, LLM-free."""
 
     def check(self, code: str, language: str, rules: list[Rule]) -> CheckReport:
+        language = resolve_dialect(code, language)
+        applicable = rule_languages(language)
         tree = parse(code, language)
         report = CheckReport(language=language, syntax_ok=not tree.root_node.has_error)
         root = tree.root_node
         for rule in rules:
-            if rule.language != language:
+            if rule.language not in applicable:
                 continue
             validate_rule(rule)
+            try:
+                violations = self._check_rule(rule, root, language)
+            except RuleError:
+                # query references a node type the dialect grammar lacks
+                report.skipped_rules.append(rule.id)
+                continue
             report.checked_rules.append(rule.id)
-            report.violations.extend(self._check_rule(rule, root))
+            report.violations.extend(violations)
         # deterministic ordering: by position, then rule id
         report.violations.sort(
             key=lambda v: (v.start_line, v.start_col, v.rule_id)
         )
         return report
 
-    def _check_rule(self, rule: Rule, root: Node) -> list[RuleViolation]:
-        query = _compile(rule.language, rule.query)
+    def _check_rule(self, rule: Rule, root: Node, language: str) -> list[RuleViolation]:
+        # compile against the grammar the tree was parsed with, which may be
+        # a dialect of rule.language (e.g. typescript rule on a tsx tree)
+        query = _compile(language, rule.query)
         if rule.type == "forbid":
             return [
                 _violation(rule, _first_node(captures, rule.capture))
@@ -217,7 +231,7 @@ class RuleEngine:
                 return [_violation(rule, None)]
             return []
         if rule.type == "require_in":
-            scope_query = _compile(rule.language, rule.scope_query or "")
+            scope_query = _compile(language, rule.scope_query or "")
             violations = []
             for captures in _matches(scope_query, root):
                 scope_node = _first_node(captures, rule.capture)

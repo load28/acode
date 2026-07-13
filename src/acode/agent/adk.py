@@ -299,9 +299,10 @@ class AdkCodingAgent:
     async def review(self, code: str, language: str,
                      metadata: dict[str, Any] | None = None,
                      instruction: str | None = None) -> ReviewResult:
-        from ..astcore.parser import normalize_language
+        from ..astcore.parser import resolve_dialect
 
-        language = normalize_language(language)
+        # the code may be a dialect of the declared language (JSX in "typescript")
+        language = resolve_dialect(code, language)
         agent = build_review_agent(self.store, self.provider, self.config)
         state = await self._run(agent, {
             "code": code, "language": language,
