@@ -7,6 +7,7 @@
     acode check <file> [--language L]    mechanical rule check
     acode search --language L [...]      hybrid RAG search (BM25+AST+metadata)
     acode index <path> [--language L]    index a codebase as patterns
+    acode recommend <path> [...]         evidence-based rule recommendation
     acode corpus build [...]             (re)build the corpus database
     acode corpus stats                   corpus composition and index stats
     acode generate <task> --language L   full pipeline: RAG -> LLM -> verify -> repair
@@ -73,6 +74,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("path")
     p.add_argument("--language")
     p.add_argument("--max-files", type=int, default=500)
+
+    p = sub.add_parser(
+        "recommend",
+        help="scan a codebase and recommend rules to adopt (deterministic, no LLM)")
+    p.add_argument("path")
+    p.add_argument("--language", help="only scan files of this language")
+    p.add_argument("--max-files", type=int, default=500)
+    p.add_argument("--min-sites", type=int, default=5,
+                   help="governed sites needed before a verdict is issued")
+    p.add_argument("--no-mining", action="store_true",
+                   help="skip mining new naming-rule proposals")
 
     p = sub.add_parser(
         "generate", help="generate code via the pipeline (RAG -> LLM -> verify -> repair)")
@@ -182,6 +194,18 @@ def main(argv: list[str] | None = None) -> int:
                                 max_files=args.max_files)
         print(f"indexed {len(result['indexed'])} pattern(s) "
               f"from {result['files']} file(s), skipped {result['skipped']}")
+        return 0
+
+    if args.command == "recommend":
+        from .rag.recommend import recommend_rules
+
+        report = recommend_rules(
+            store, args.path, language=args.language,
+            max_files=args.max_files, min_sites=args.min_sites,
+            mine=not args.no_mining,
+        )
+        json.dump(report, sys.stdout, ensure_ascii=False, indent=2)
+        print()
         return 0
 
     if args.command in ("generate", "review"):

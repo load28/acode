@@ -14,6 +14,8 @@ Tools:
     list_conventions    enumerate stored conventions
     delete_convention   remove a convention
     index_codebase      ingest a repo's code shapes as retrieval patterns
+    recommend_rules     evidence-based rule adoption verdicts + mined
+                        naming-rule proposals for a codebase (no LLM)
 
 check_code / search_conventions never call an LLM, so their output is
 reproducible byte-for-byte; generate/review responses always embed the
@@ -262,6 +264,28 @@ def build_server(config: AcodeConfig | None = None,
              "indexed": result["indexed"][:50]},
             ensure_ascii=False,
         )
+
+    @mcp.tool()
+    def recommend_rules(
+        path: str,
+        language: str | None = None,
+        max_files: int = 500,
+        min_sites: int = 5,
+        mine: bool = True,
+    ) -> str:
+        """Scan a codebase and recommend conventions, deterministically.
+        `catalog` judges every stored rule against the code (adopt /
+        fix_first / conflicts / insufficient_evidence, with per-rule
+        evidence: governed sites, conformance, violating files).
+        `proposals` are naming rules mined from the code itself — each is
+        self-verified and can be passed to add_convention as-is."""
+        from ..rag.recommend import recommend_rules as _recommend
+
+        report = _recommend(
+            store, path, language=language, max_files=max_files,
+            min_sites=min_sites, mine=mine,
+        )
+        return json.dumps(report, ensure_ascii=False, indent=2)
 
     @mcp.tool()
     def server_info() -> str:
