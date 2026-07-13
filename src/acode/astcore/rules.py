@@ -29,7 +29,7 @@ from tree_sitter import Node, Query, QueryCursor, QueryError
 
 from .parser import get_language, parse, resolve_dialect, rule_languages
 
-RULE_TYPES = ("forbid", "require", "require_in", "naming")
+RULE_TYPES = ("forbid", "require", "require_in", "naming", "analysis")
 
 
 class RuleError(ValueError):
@@ -47,6 +47,7 @@ class Rule:
     regex: str | None = None
     scope_query: str | None = None
     severity: str = "error"
+    analyzer: str | None = None  # analysis rules: name in analyzers.ANALYZERS
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -59,6 +60,7 @@ class Rule:
             "regex": self.regex,
             "scope_query": self.scope_query,
             "severity": self.severity,
+            "analyzer": self.analyzer,
         }
 
     @classmethod
@@ -73,6 +75,7 @@ class Rule:
             regex=data.get("regex"),
             scope_query=data.get("scope_query"),
             severity=data.get("severity", "error"),
+            analyzer=data.get("analyzer"),
         )
 
 
@@ -137,6 +140,17 @@ def validate_rule(rule: Rule) -> None:
     """Raise RuleError if the rule cannot be executed deterministically."""
     if rule.type not in RULE_TYPES:
         raise RuleError(f"unknown rule type {rule.type!r}; expected one of {RULE_TYPES}")
+    if rule.type == "analysis":
+        from .analyzers import ANALYZERS
+
+        if not rule.analyzer:
+            raise RuleError("analysis rules need an analyzer name")
+        if rule.analyzer not in ANALYZERS:
+            raise RuleError(
+                f"unknown analyzer {rule.analyzer!r}; "
+                f"available: {', '.join(sorted(ANALYZERS))}"
+            )
+        return
     _compile(rule.language, rule.query)
     if rule.type == "require_in":
         if not rule.scope_query:
@@ -218,6 +232,10 @@ class RuleEngine:
         return report
 
     def _check_rule(self, rule: Rule, root: Node, language: str) -> list[RuleViolation]:
+        if rule.type == "analysis":
+            from .analyzers import get_analyzer
+
+            return get_analyzer(rule.analyzer or "")(root, rule, language)
         # compile against the grammar the tree was parsed with, which may be
         # a dialect of rule.language (e.g. typescript rule on a tsx tree)
         query = _compile(language, rule.query)

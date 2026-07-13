@@ -187,6 +187,7 @@ def build_server(config: AcodeConfig | None = None,
         capture: str | None = None,
         regex: str | None = None,
         scope_query: str | None = None,
+        analyzer: str | None = None,
         severity: str = "error",
         good_example: str = "",
         bad_example: str = "",
@@ -196,18 +197,24 @@ def build_server(config: AcodeConfig | None = None,
         replace: bool = False,
     ) -> str:
         """Store a convention. kind='rule' needs rule_type
-        (forbid|require|require_in|naming), a tree-sitter query and a message;
-        the rule is validated mechanically on insert (it must flag
-        bad_example and pass good_example). kind='pattern' needs a
+        (forbid|require|require_in|naming|analysis) and a message, plus a
+        tree-sitter query (query types) or a built-in analyzer name
+        (type='analysis'); the rule is validated mechanically on insert (it
+        must flag bad_example and pass good_example). kind='pattern' needs a
         good_example snippet and is used for AST-similarity retrieval."""
         rule = None
         if kind == "rule":
-            if not (rule_type and query and message):
-                raise ValueError("kind='rule' requires rule_type, query and message")
+            if not (rule_type and message):
+                raise ValueError("kind='rule' requires rule_type and message")
+            if rule_type == "analysis":
+                if not analyzer:
+                    raise ValueError("rule_type='analysis' requires analyzer")
+            elif not query:
+                raise ValueError(f"rule_type={rule_type!r} requires query")
             rule = Rule(
-                id=id, language=language, type=rule_type, query=query,
+                id=id, language=language, type=rule_type, query=query or "",
                 message=message, capture=capture, regex=regex,
-                scope_query=scope_query, severity=severity,
+                scope_query=scope_query, severity=severity, analyzer=analyzer,
             )
         conv = Convention(
             id=id, kind=kind, language=language, title=title,

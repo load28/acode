@@ -181,5 +181,32 @@
     },
     "good_example": "interface UserProfile {\n  id: number;\n  name: string;\n}\n",
     "bad_example": "interface user_profile {\n  id: number;\n  name: string;\n}\n"
+  },
+  {
+    "id": "ts-no-optional-variant-bag",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No optional-property variant bags \u2014 use discriminated unions",
+    "guideline": "Optional (?) marks data that is genuinely conditional. Never merge several variants into one interface full of optionals; key the variants on a discriminant field (a literal-union property) so the compiler infers exactly which data exists in which state. Flagged mechanically when a discriminant key already coexists with the optionals, or when usages fill the optional keys in disjoint groups.",
+    "metadata": {"category": "types", "tags": ["typescript", "strict", "union", "optional", "view-model"]},
+    "rule": {
+      "id": "ts-no-optional-variant-bag",
+      "language": "typescript",
+      "type": "analysis",
+      "analyzer": "optional-variant-bag",
+      "query": "",
+      "message": "interface merges variants behind optional properties; split it into a discriminated union"
+    },
+    "good_example": "type CardView =\n  | { status: 'loading'; title: string }\n  | { status: 'loaded'; title: string; imageUrl: string }\n  | { status: 'failed'; title: string; error: string };\n",
+    "bad_example": "interface CardView {\n  status: 'loading' | 'loaded' | 'failed';\n  title: string;\n  imageUrl?: string;\n  error?: string;\n}\n"
+  },
+  {
+    "id": "ts-pattern-discriminated-view-model",
+    "kind": "pattern",
+    "language": "typescript",
+    "title": "Discriminated union view model (key-driven narrowing)",
+    "guideline": "Model view data as a union keyed on a discriminant so each state declares exactly the data it needs, and narrowing on the key gives full inference at the use site.",
+    "metadata": {"category": "types", "tags": ["typescript", "union", "view-model", "react"]},
+    "good_example": "type PokemonCardView =\n  | { kind: 'summary'; id: number; name: string }\n  | { kind: 'detail'; id: number; name: string; imageUrl: string; types: string[] };\n\nexport function cardTitle(view: PokemonCardView): string {\n  if (view.kind === 'detail') {\n    return `${view.name} (${view.types.length} types)`;\n  }\n  return view.name;\n}\n"
   }
 ]
