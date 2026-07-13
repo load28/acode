@@ -4,7 +4,7 @@
 > 규칙: [/CLAUDE.md](../../CLAUDE.md) · 새 태스크: [TEMPLATE.md](TEMPLATE.md) 복사
 > 상태: `todo` 착수 전 · `in_progress` 진행 중 · `blocked` 대기(문서에 사유) · `done` 완료+검증
 
-**마지막 태스크 번호: 0008** (새 태스크는 0009부터)
+**마지막 태스크 번호: 0009** (새 태스크는 0010부터)
 
 | ID | 제목 | 상태 | 시작 | 완료 | 주요 파일 |
 |---|---|---|---|---|---|
@@ -17,6 +17,8 @@
 | [TASK-0007](TASK-0007-tsx-dialect-support.md) | JSX/TSX 다이얼렉트 기계 검증 지원 (자동 승격 + 룰 상속 + override + tsx 룰셋) | done | 2026-07-13 | 2026-07-13 | `src/acode/astcore/parser.py`, `src/acode/astcore/rules.py`, `src/acode/agent/steps.py`, `conventions/tsx.json` |
 
 | [TASK-0008](TASK-0008-optional-variant-bag-analyzer.md) | 옵셔널 난발 검출 — analysis 룰 타입 + optional-variant-bag 분석기 | done | 2026-07-13 | 2026-07-13 | `src/acode/astcore/analyzers.py`, `src/acode/astcore/rules.py`, `conventions/typescript.json`, `tests/test_optional_variant_bag.py` |
+
+| [TASK-0009](TASK-0009-record-key-inference-analyzer.md) | Record 키 넓힘 검출 — record-key-inference 분석기 | done | 2026-07-13 | 2026-07-13 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_record_key_inference.py` |
 
 ## 열린 태스크 (todo / in_progress / blocked)
 

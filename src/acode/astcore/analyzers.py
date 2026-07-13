@@ -176,8 +176,117 @@ def optional_variant_bag(root: Node, rule: Rule, language: str) -> list[RuleViol
     return violations
 
 
+def _annotates_string_keyed_map(annotation: Node) -> bool:
+    """True for ``Record<string, V>`` or ``{ [k: string]: V }`` annotations."""
+    for node in annotation.named_children:
+        if node.type == "generic_type":
+            named = node.named_children
+            if (
+                len(named) >= 2
+                and named[0].type == "type_identifier"
+                and _text(named[0]) == "Record"
+                and named[1].type == "type_arguments"
+            ):
+                args = named[1].named_children
+                if args and args[0].type == "predefined_type" and _text(args[0]) == "string":
+                    return True
+        elif node.type == "object_type":
+            for member in node.named_children:
+                if member.type != "index_signature":
+                    continue
+                key_type = next(
+                    (c for c in member.named_children if c.type == "predefined_type"),
+                    None,
+                )
+                if key_type is not None and _text(key_type) == "string":
+                    return True
+    return False
+
+
+def _static_object_keys(obj: Node) -> list[str] | None:
+    """Key names if the literal enumerates a closed set: only plain
+    identifier / string keys. Spread or computed keys mean the set may be
+    open -> None. An empty literal is a dynamic accumulator -> None."""
+    keys = []
+    for entry in obj.named_children:
+        if entry.type != "pair":
+            return None  # spread_element, method, ...
+        key = entry.child_by_field_name("key")
+        if key is None or key.type not in ("property_identifier", "string"):
+            return None  # computed_property_name etc.
+        keys.append(_text(key).strip("'\""))
+    return keys or None
+
+
+def _has_dynamic_key_write(root: Node, var_name: str) -> bool:
+    """True if the file writes ``var_name[<non-literal>] = ...`` — evidence
+    the map is genuinely dynamic, so open string keys are legitimate."""
+    for node in _walk(root):
+        if node.type not in ("assignment_expression", "augmented_assignment_expression"):
+            continue
+        left = node.child_by_field_name("left")
+        if left is None or left.type != "subscript_expression":
+            continue
+        obj = left.child_by_field_name("object")
+        index = left.child_by_field_name("index")
+        if (
+            obj is not None
+            and obj.type == "identifier"
+            and _text(obj) == var_name
+            and index is not None
+            and index.type != "string"
+        ):
+            return True
+    return False
+
+
+def record_key_inference(root: Node, rule: Rule, language: str) -> list[RuleViolation]:
+    """Flag string-keyed map annotations contradicted by their initializer.
+
+    A variable annotated ``Record<string, V>`` (or ``{ [k: string]: V }``)
+    but initialized with a closed set of literal keys should derive its key
+    type instead (``keyof typeof`` over an ``as const`` object, or an
+    existing union). Silent when the literal is empty, contains spread /
+    computed keys, or the file writes to the map with a dynamic key — those
+    are genuinely open maps where ``string`` is the honest type.
+    """
+    violations = []
+    for decl in _walk(root):
+        if decl.type != "variable_declarator":
+            continue
+        name_node = decl.child_by_field_name("name")
+        annotation = decl.child_by_field_name("type")
+        value = decl.child_by_field_name("value")
+        if (
+            name_node is None
+            or annotation is None
+            or value is None
+            or value.type != "object"
+            or name_node.type != "identifier"
+            or not _annotates_string_keyed_map(annotation)
+        ):
+            continue
+        keys = _static_object_keys(value)
+        if keys is None:
+            continue
+        var_name = _text(name_node)
+        if _has_dynamic_key_write(root, var_name):
+            continue
+        violations.append(
+            _violation(
+                rule,
+                annotation,
+                f"'{var_name}' is typed with open string keys but initialized "
+                f"with a closed set ({', '.join(keys)}) — derive the key type "
+                f"instead: `as const` + `keyof typeof`, or an existing union type",
+            )
+        )
+    return violations
+
+
 ANALYZERS: dict[str, Callable[[Node, Rule, str], list[RuleViolation]]] = {
     "optional-variant-bag": optional_variant_bag,
+    "record-key-inference": record_key_inference,
 }
 
 

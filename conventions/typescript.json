@@ -208,5 +208,32 @@
     "guideline": "Model view data as a union keyed on a discriminant so each state declares exactly the data it needs, and narrowing on the key gives full inference at the use site.",
     "metadata": {"category": "types", "tags": ["typescript", "union", "view-model", "react"]},
     "good_example": "type PokemonCardView =\n  | { kind: 'summary'; id: number; name: string }\n  | { kind: 'detail'; id: number; name: string; imageUrl: string; types: string[] };\n\nexport function cardTitle(view: PokemonCardView): string {\n  if (view.kind === 'detail') {\n    return `${view.name} (${view.types.length} types)`;\n  }\n  return view.name;\n}\n"
+  },
+  {
+    "id": "ts-no-wide-record-key",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No Record<string, V> over a closed key set \u2014 derive the key type",
+    "guideline": "Use string keys only for genuinely open, dynamic maps. When the initializer enumerates every key as a literal, the key set is closed: derive the key type with `as const` + `keyof typeof`, or use an existing union type, so lookups and exhaustiveness are inferred by the compiler.",
+    "metadata": {"category": "types", "tags": ["typescript", "strict", "record", "inference"]},
+    "rule": {
+      "id": "ts-no-wide-record-key",
+      "language": "typescript",
+      "type": "analysis",
+      "analyzer": "record-key-inference",
+      "query": "",
+      "message": "string-keyed map annotation contradicts its closed literal-key initializer; derive the key type"
+    },
+    "good_example": "const TYPE_COLORS = {\n  fire: '#EE8130',\n  water: '#6390F0',\n} as const;\n\ntype ElementType = keyof typeof TYPE_COLORS;\n\nconst TYPE_LABEL: Record<ElementType, string> = {\n  fire: 'Fire',\n  water: 'Water',\n};\n",
+    "bad_example": "const TYPE_COLORS: Record<string, string> = {\n  fire: '#EE8130',\n  water: '#6390F0',\n};\n"
+  },
+  {
+    "id": "ts-pattern-derived-record-keys",
+    "kind": "pattern",
+    "language": "typescript",
+    "title": "Derived record keys (as const + keyof typeof)",
+    "guideline": "Let the source object carry the truth: freeze it with `as const`, derive the key type with `keyof typeof`, and type dependent maps/params with the derived union so keys and values stay inferred end to end.",
+    "metadata": {"category": "types", "tags": ["typescript", "record", "inference", "as-const"]},
+    "good_example": "const STATUS_LABEL = {\n  idle: 'Idle',\n  running: 'Running',\n  done: 'Done',\n} as const;\n\ntype Status = keyof typeof STATUS_LABEL;\n\nexport function labelOf(status: Status): string {\n  return STATUS_LABEL[status];\n}\n"
   }
 ]
