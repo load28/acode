@@ -344,15 +344,23 @@ class ConventionStore:
         """Hybrid retrieval: hard metadata filter, then a weighted blend
         of the available ranking signals —
 
-            query (text)  BM25 over the inverted index      weight 0.35
-            code (AST)    fingerprint cosine similarity     weight 0.45
-            metadata      soft overlap score                weight 0.20
+            query (text)   BM25 over the inverted index        weight 0.35
+            code (AST)     fingerprint cosine similarity       weight 0.45
+            code (rules)   rule applicability: governed sites  weight 0.45
+                           the rule's structure actually finds
+                           in the query code (rule kind only)
+            metadata       soft overlap score                  weight 0.20
 
-        Weights renormalize over the signals actually provided (e.g.
-        text-only search ranks 0.64 * bm25 + 0.36 * metadata). With a
-        text query and no code, entries with zero lexical match are
-        dropped, like a search engine. Deterministic: same corpus +
-        same query = same order (ties break on id).
+        Weights renormalize per convention over the signals it can carry
+        (patterns never carry `applies`; text-only search ranks
+        0.64 * bm25 + 0.36 * metadata). The applicability signal is what
+        surfaces *complex* rules: an analysis rule like
+        optional-variant-bag matches its candidate population (interfaces
+        with >= 2 optional properties) even before any violation exists,
+        where BM25 and fingerprints see nothing. With a text query and no
+        code, entries with zero lexical match are dropped, like a search
+        engine. Deterministic: same corpus + same query = same order
+        (ties break on id).
         """
         language = normalize_language(language)
         metadata = metadata or {}
@@ -364,13 +372,18 @@ class ConventionStore:
         query_fp = fingerprint_code(code, language) if code else None
         ast_scores = self.vector_engine().similarities(query_fp) if query_fp else None
         text_scores = self.lexical_engine().scores(query) if query else None
+        applies_scores = (
+            self._rule_applicability(code, language, candidates)
+            if code else None
+        )
 
         weights: dict[str, float] = {"meta": 0.20}
         if ast_scores is not None:
             weights["ast"] = 0.45
         if text_scores is not None:
             weights["text"] = 0.35
-        total_weight = sum(weights.values())
+        if applies_scores is not None:
+            weights["applies"] = 0.45
 
         hits: list[SearchHit] = []
         for conv in candidates:
@@ -386,10 +399,14 @@ class ConventionStore:
                 parts["text"] = text_scores.get(conv.id, 0.0)
                 if parts["text"] == 0.0 and query_fp is None:
                     continue  # pure text search: no lexical match, no hit
-            score = sum(weights[k] * parts[k] for k in weights) / total_weight
+            if applies_scores is not None and conv.kind == "rule":
+                parts["applies"] = applies_scores.get(conv.id, 0.0)
+            total_weight = sum(weights[k] for k in parts)
+            score = sum(weights[k] * parts[k] for k in parts) / total_weight
             reason = ", ".join(
                 f"{name}={parts[k]:.3f}" for k, name in (
                     ("text", "bm25"), ("ast", "ast_similarity"),
+                    ("applies", "rule_applicability"),
                     ("meta", "metadata_overlap"))
                 if k in parts
             )
@@ -397,6 +414,36 @@ class ConventionStore:
 
         hits.sort(key=lambda h: (-h.score, h.convention.id))
         return hits[:top_k]
+
+    # sites at which a rule's applicability saturates: a snippet with 3
+    # governed sites is as strong a signal as thirty
+    _APPLIES_SATURATION = 3
+
+    def _rule_applicability(
+        self, code: str, language: str, candidates: list[Convention]
+    ) -> dict[str, float]:
+        """[0, 1] per rule convention: how much of the rule's governed
+        structure exists in ``code`` (see astcore.rules.governed_sites).
+        This is what lets complex analysis rules be recommended from code
+        shape alone — their preconditions, not their keywords."""
+        from ..astcore.parser import parse, resolve_dialect
+        from ..astcore.rules import governed_sites
+
+        lang = resolve_dialect(code, language)
+        root = parse(code, lang).root_node
+        scores: dict[str, float] = {}
+        for conv in candidates:
+            if conv.kind != "rule" or conv.rule is None:
+                continue
+            if conv.language not in rule_languages(lang):
+                continue
+            try:
+                sites = governed_sites(conv.rule, root, lang)
+            except RuleError:
+                continue  # query targets a node this grammar lacks
+            if sites:
+                scores[conv.id] = min(1.0, sites / self._APPLIES_SATURATION)
+        return scores
 
     # ---------------------------------------------------------- import/export
 

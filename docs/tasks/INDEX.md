@@ -4,7 +4,7 @@
 > 규칙: [/CLAUDE.md](../../CLAUDE.md) · 새 태스크: [TEMPLATE.md](TEMPLATE.md) 복사
 > 상태: `todo` 착수 전 · `in_progress` 진행 중 · `blocked` 대기(문서에 사유) · `done` 완료+검증
 
-**마지막 태스크 번호: 0010** (새 태스크는 0011부터)
+**마지막 태스크 번호: 0011** (새 태스크는 0012부터)
 
 | ID | 제목 | 상태 | 시작 | 완료 | 주요 파일 |
 |---|---|---|---|---|---|
@@ -20,6 +20,7 @@
 
 | [TASK-0009](TASK-0009-record-key-inference-analyzer.md) | Record 키 넓힘 검출 — record-key-inference 분석기 | done | 2026-07-13 | 2026-07-13 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_record_key_inference.py` |
 | [TASK-0010](TASK-0010-rule-recommendation-engine.md) | 룰 추천 엔진 — 증거 기반 채택 판정 + 네이밍 마이닝 | done | 2026-07-13 | 2026-07-13 | `src/acode/rag/recommend.py`, `src/acode/cli.py`, `src/acode/mcpserver/server.py`, `tests/test_recommend.py` |
+| [TASK-0011](TASK-0011-rule-applicability-complexity.md) | 룰 복잡도 스펙트럼 추천 — 마이닝 제거 + 지배 사이트 적용성 신호 | done | 2026-07-13 | 2026-07-13 | `src/acode/astcore/analyzers.py`, `src/acode/astcore/rules.py`, `src/acode/rag/recommend.py`, `src/acode/rag/store.py` |
 
 ## 열린 태스크 (todo / in_progress / blocked)
 

@@ -1,8 +1,9 @@
-"""Rule recommendation engine (TASK-0010).
+"""Rule recommendation engine (TASK-0010, reshaped by TASK-0011).
 
-Covers: per-rule-type evidence counting, the four-way verdict, dialect
-inheritance, naming-rule mining (exclusive-evidence gate, catalog dedup,
-self-insertable proposals), determinism, and the CLI/MCP surfaces.
+Covers: per-rule-type evidence counting across the complexity spectrum
+(simple query rules and multi-signal analysis rules), the four-way
+verdict, dialect inheritance, the governed-sites primitive, the
+rule-applicability search signal, determinism, and the CLI/MCP surfaces.
 """
 
 from __future__ import annotations
@@ -12,8 +13,13 @@ from pathlib import Path
 
 import pytest
 
+from acode.astcore.analyzers import (
+    optional_variant_bag_sites,
+    record_key_inference_sites,
+)
+from acode.astcore.parser import parse
+from acode.astcore.rules import Rule, governed_sites
 from acode.rag.recommend import recommend_rules
-from acode.rag.store import Convention, ConventionStore
 
 
 def _write(root: Path, name: str, code: str) -> None:
@@ -29,6 +35,13 @@ def _by_id(report: dict, rule_id: str) -> dict:
     return entry
 
 
+VARIANT_CANDIDATE = "interface Opts{n} {{ width?: number; height?: number; }}\n"
+VARIANT_VIOLATION = (
+    'interface Payment {\n  method: "card" | "bank";\n'
+    "  cardNumber?: string;\n  iban?: string;\n}\n"
+)
+
+
 @pytest.fixture()
 def ts_repo(tmp_path: Path) -> Path:
     # six files: camelCase functions dominate, no var/enum anywhere
@@ -37,6 +50,57 @@ def ts_repo(tmp_path: Path) -> Path:
                f"function loadThing{i}() {{ return {i}; }}\n"
                f"function saveThing{i}() {{ return {i}; }}\n")
     return tmp_path
+
+
+class TestGovernedSites:
+    """The shared site-semantics primitive, per rule type."""
+
+    def _root(self, code: str, language: str = "typescript"):
+        return parse(code, language).root_node
+
+    def test_naming_counts_captures(self):
+        rule = Rule(id="r", language="typescript", type="naming",
+                    query="(function_declaration name: (identifier) @name)",
+                    capture="name", regex="[a-z].*", message="m")
+        root = self._root("function a() {}\nfunction b() {}\nfunction c() {}\n")
+        assert governed_sites(rule, root, "typescript") == 3
+
+    def test_require_in_counts_scopes(self):
+        rule = Rule(id="r", language="python", type="require_in",
+                    scope_query="(function_definition) @scope", capture="scope",
+                    query="(function_definition body: (block . (expression_statement (string))))",
+                    message="m")
+        root = self._root("def a():\n    pass\n\ndef b():\n    pass\n", "python")
+        assert governed_sites(rule, root, "python") == 2
+
+    def test_require_governs_the_file(self):
+        rule = Rule(id="r", language="python", type="require",
+                    query="(import_statement)", message="m")
+        assert governed_sites(rule, self._root("x = 1\n", "python"), "python") == 1
+
+    def test_forbid_counts_matches(self):
+        rule = Rule(id="r", language="typescript", type="forbid",
+                    query="(enum_declaration) @bad", capture="bad", message="m")
+        root = self._root("enum A { X }\nenum B { Y }\n")
+        assert governed_sites(rule, root, "typescript") == 2
+
+    def test_analysis_counts_candidate_population(self):
+        rule = Rule(id="r", language="typescript", type="analysis", query="",
+                    analyzer="optional-variant-bag", message="m")
+        # two candidates (>= 2 optionals), one non-candidate (1 optional)
+        root = self._root(
+            "interface A { x?: number; y?: number; }\n"
+            "interface B { p?: string; q?: string; }\n"
+            "interface C { only?: string; fixed: number; }\n")
+        assert governed_sites(rule, root, "typescript") == 2
+
+    def test_analyzer_site_counters(self):
+        root = self._root(
+            "const a: Record<string, number> = {};\n"
+            "const b: { [k: string]: string } = { x: 'y' };\n"
+            "const c: number = 1;\n")
+        assert record_key_inference_sites(root) == 2
+        assert optional_variant_bag_sites(root) == 0
 
 
 class TestCatalogVerdicts:
@@ -54,7 +118,7 @@ class TestCatalogVerdicts:
         assert entry["evidence"]["sites"] == 12
         assert entry["confidence"] == pytest.approx(12 / 20)
 
-    def test_fix_first_minority_naming_violation(self, seeded_store, ts_repo):
+    def test_adopt_lists_minority_naming_violation(self, seeded_store, ts_repo):
         _write(ts_repo, "src/legacy.ts", "function Legacy_Load() { return 1; }\n")
         entry = _by_id(recommend_rules(seeded_store, ts_repo), "ts-func-camel-case")
         # 12/13 conform (92%) -> still adopt; the violation is listed for cleanup
@@ -91,7 +155,6 @@ class TestCatalogVerdicts:
         entry = _by_id(recommend_rules(seeded_store, tmp_path), "py-docstring-required")
         assert entry["evidence"]["sites"] == 5
         assert entry["evidence"]["violations"] == 1
-        assert entry["verdict"] == "fix_first" or entry["verdict"] == "adopt"
         # 4/5 = 0.8 -> between 0.5 and 0.9 -> fix_first
         assert entry["verdict"] == "fix_first"
 
@@ -113,83 +176,91 @@ class TestCatalogVerdicts:
         assert ranks == sorted(ranks)
 
 
-class TestMining:
-    def test_proposes_dominant_style_with_exclusive_evidence(self, store, tmp_path):
-        for i in range(3):
-            _write(tmp_path, f"m{i}.py",
-                   f"def load_thing_{i}():\n    pass\n\n"
-                   f"def save_thing_{i}():\n    pass\n")
-        report = recommend_rules(store, tmp_path)
-        assert len(report["proposals"]) == 1
-        prop = report["proposals"][0]
-        assert prop["id"] == "mined-python-function-naming"
-        assert "snake_case" in prop["title"]
-        assert prop["evidence"]["sites"] == 6
-        assert prop["evidence"]["exclusive"] == 6
+class TestComplexRuleEvidence:
+    """analysis rules get the same conformance-based verdicts as simple
+    ones: their candidate populations are counted as governed sites."""
 
-    def test_proposal_is_self_insertable(self, store, tmp_path):
+    def test_analysis_conformance_verdict(self, seeded_store, tmp_path):
         for i in range(5):
-            _write(tmp_path, f"m{i}.py", f"def handle_req_{i}():\n    pass\n")
-        report = recommend_rules(store, tmp_path)
-        conv = Convention.from_dict(report["proposals"][0]["convention"])
-        stored = store.add(conv)  # self-verifies on insert
-        assert store.get(stored.id) is not None
+            _write(tmp_path, f"opts{i}.ts", VARIANT_CANDIDATE.format(n=i))
+        _write(tmp_path, "payment.ts", VARIANT_VIOLATION)
+        entry = _by_id(recommend_rules(seeded_store, tmp_path),
+                       "ts-no-optional-variant-bag")
+        assert entry["rule_type"] == "analysis"
+        assert entry["evidence"]["sites"] == 6
+        assert entry["evidence"]["violations"] == 1
+        # 5/6 conform (83%) -> fix_first, judged by ratio not dispersion
+        assert entry["verdict"] == "fix_first"
+        assert "5/6 sites conform" in entry["reason"]
 
-    def test_silent_when_all_samples_ambiguous(self, store, tmp_path):
-        # single lowercase words match camelCase AND snake_case: no exclusive
-        # evidence, so no style may be proposed
-        _write(tmp_path, "m.py",
-               "def fetch():\n    pass\n\ndef run():\n    pass\n\n"
-               "def load():\n    pass\n\ndef save():\n    pass\n\n"
-               "def send():\n    pass\n")
-        report = recommend_rules(store, tmp_path)
-        assert report["proposals"] == []
-
-    def test_silent_below_min_sites(self, store, tmp_path):
-        _write(tmp_path, "m.py", "def only_one_func():\n    pass\n")
-        assert recommend_rules(store, tmp_path)["proposals"] == []
-
-    def test_silent_when_no_dominant_style(self, store, tmp_path):
-        _write(tmp_path, "m.py",
-               "def load_thing():\n    pass\n\ndef saveThing():\n    pass\n\n"
-               "def store_thing():\n    pass\n\ndef fetchThing():\n    pass\n\n"
-               "def del_thing():\n    pass\n\ndef putThing():\n    pass\n")
-        assert recommend_rules(store, tmp_path)["proposals"] == []
-
-    def test_dedups_against_catalog_rule(self, seeded_store, ts_repo):
-        # ts-func-camel-case already governs function names -> no proposal
-        report = recommend_rules(seeded_store, ts_repo)
-        assert not any("function" in p["id"] and p["id"].startswith("mined-typescript")
-                       for p in report["proposals"])
-
-    def test_mines_uncovered_construct_in_seeded_store(self, seeded_store, tmp_path):
-        # python classes ARE covered by py-class-pascal-case; methods are not a
-        # target, so mine typescript classes which the seed catalog doesn't name
+    def test_analysis_adopt_with_conforming_candidates(self, seeded_store, tmp_path):
         for i in range(5):
-            _write(tmp_path, f"c{i}.ts", f"class HttpClient{i} {{ }}\n")
-        report = recommend_rules(seeded_store, tmp_path)
-        ids = [p["id"] for p in report["proposals"]]
-        assert "mined-typescript-class-naming" in ids
+            _write(tmp_path, f"opts{i}.ts", VARIANT_CANDIDATE.format(n=i))
+        entry = _by_id(recommend_rules(seeded_store, tmp_path),
+                       "ts-no-optional-variant-bag")
+        assert entry["verdict"] == "adopt"
+        assert entry["evidence"]["sites"] == 5
+        assert entry["evidence"]["violations"] == 0
 
-    def test_tsx_mines_into_typescript(self, store, tmp_path):
-        for i in range(5):
-            _write(tmp_path, f"c{i}.tsx",
-                   f"function AppView{i}() {{ return <div/>; }}\n")
-        report = recommend_rules(store, tmp_path)
-        prop = next(p for p in report["proposals"]
-                    if p["id"] == "mined-typescript-function-naming")
-        assert "PascalCase" in prop["title"]
+    def test_analysis_no_candidates_is_insufficient_not_adopt(
+            self, seeded_store, ts_repo):
+        # no interfaces at all: "no violations" must not read as adoption
+        entry = _by_id(recommend_rules(seeded_store, ts_repo),
+                       "ts-no-optional-variant-bag")
+        assert entry["verdict"] == "insufficient_evidence"
+        assert entry["evidence"]["sites"] == 0
 
-    def test_mine_false_skips_proposals(self, store, tmp_path):
+    def test_record_key_candidates_counted(self, seeded_store, tmp_path):
         for i in range(5):
-            _write(tmp_path, f"m{i}.py", f"def do_work_{i}():\n    pass\n")
-        report = recommend_rules(store, tmp_path, mine=False)
-        assert report["proposals"] == []
+            _write(tmp_path, f"open{i}.ts",
+                   f"const cache{i}: Record<string, number> = {{}};\n")
+        _write(tmp_path, "closed.ts",
+               "const palette: Record<string, string> = { red: '#f00', blue: '#00f' };\n")
+        entry = _by_id(recommend_rules(seeded_store, tmp_path),
+                       "ts-no-wide-record-key")
+        assert entry["evidence"]["sites"] == 6
+        assert entry["evidence"]["violations"] == 1
+        assert entry["verdict"] == "fix_first"
+
+
+class TestApplicabilitySearch:
+    """search(code=...) recommends rules by the structure they govern —
+    complex analysis rules surface from their preconditions alone."""
+
+    def test_complex_rule_recommended_before_any_violation(self, seeded_store):
+        # three variant-bag candidates, zero violations, zero keywords
+        code = "".join(VARIANT_CANDIDATE.format(n=i) for i in range(3))
+        hits = seeded_store.search(language="typescript", code=code, kind="rule")
+        top = [h.convention.id for h in hits[:3]]
+        assert "ts-no-optional-variant-bag" in top
+        hit = next(h for h in hits
+                   if h.convention.id == "ts-no-optional-variant-bag")
+        assert "rule_applicability=1.000" in hit.reason
+
+    def test_record_rule_surfaces_from_annotation_shape(self, seeded_store):
+        code = "const palette: Record<string, string> = { red: '#f00' };\n"
+        hits = seeded_store.search(language="typescript", code=code, kind="rule")
+        ids = [h.convention.id for h in hits]
+        # governs this code -> must outrank rules that govern nothing here
+        assert ids.index("ts-no-wide-record-key") < ids.index("ts-no-var")
+        assert ids.index("ts-no-wide-record-key") < ids.index("ts-no-console-log")
+
+    def test_inapplicable_rules_score_zero_on_applies(self, seeded_store):
+        code = "const n: number = 1;\n"
+        hits = seeded_store.search(language="typescript", code=code, kind="rule")
+        hit = next(h for h in hits if h.convention.id == "ts-func-camel-case")
+        assert "rule_applicability=0.000" in hit.reason
+
+    def test_patterns_do_not_carry_the_applies_signal(self, seeded_store):
+        code = "const palette: Record<string, string> = { red: '#f00' };\n"
+        hits = seeded_store.search(language="typescript", code=code, kind="pattern")
+        assert hits and all("rule_applicability" not in h.reason for h in hits)
 
 
 class TestDeterminismAndSurfaces:
     def test_report_is_reproducible(self, seeded_store, ts_repo):
         _write(ts_repo, "src/legacy.ts", "var x = 1;\nenum E { A }\n")
+        _write(ts_repo, "src/opts.ts", VARIANT_CANDIDATE.format(n=9))
         first = recommend_rules(seeded_store, ts_repo)
         second = recommend_rules(seeded_store, ts_repo)
         assert json.dumps(first, sort_keys=True) == json.dumps(second, sort_keys=True)
@@ -205,6 +276,14 @@ class TestDeterminismAndSurfaces:
         assert report["languages"] == {"python": 1}
         assert all(r["language"] == "python" for r in report["catalog"])
 
+    def test_single_file_root(self, seeded_store, tmp_path):
+        _write(tmp_path, "one.ts", VARIANT_VIOLATION)
+        report = recommend_rules(seeded_store, tmp_path / "one.ts")
+        assert report["files"] == 1
+        entry = _by_id(report, "ts-no-optional-variant-bag")
+        assert entry["evidence"]["sites"] == 1
+        assert entry["evidence"]["violations"] == 1
+
     def test_cli_recommend(self, tmp_path, capsys):
         from acode.cli import main
 
@@ -219,6 +298,7 @@ class TestDeterminismAndSurfaces:
         assert main(["--db", str(db), "recommend", str(src)]) == 0
         report = json.loads(capsys.readouterr().out)
         assert report["files"] == 6
+        assert "proposals" not in report
         assert any(r["id"] == "ts-func-camel-case" and r["verdict"] == "adopt"
                    for r in report["catalog"])
 
@@ -234,10 +314,13 @@ class TestMcpTool:
         tools = {t.name for t in await server.list_tools()}
         assert "recommend_rules" in tools
 
-        for i in range(6):
-            _write(tmp_path, f"m{i}.ts", f"function getItem{i}() {{ return {i}; }}\n")
+        for i in range(5):
+            _write(tmp_path, f"opts{i}.ts", VARIANT_CANDIDATE.format(n=i))
         result, _ = await server.call_tool(
             "recommend_rules", {"path": str(tmp_path)})
         report = json.loads(result[0].text)
-        assert report["files"] == 6
-        assert any(r["verdict"] == "adopt" for r in report["catalog"])
+        assert report["files"] == 5
+        analysis = next(r for r in report["catalog"]
+                        if r["id"] == "ts-no-optional-variant-bag")
+        assert analysis["verdict"] == "adopt"
+        assert analysis["evidence"]["sites"] == 5

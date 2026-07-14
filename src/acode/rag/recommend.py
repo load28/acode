@@ -1,26 +1,26 @@
 """Evidence-based rule recommendation over a codebase.
 
-Scans a source tree and produces two deterministic recommendation lists:
+Scans a source tree and judges every stored ``rule`` convention against
+it, across the whole rule-complexity spectrum — from single-query rules
+(forbid, naming) to multi-signal ``analysis`` rules. Evidence is gathered
+per rule type:
 
-    catalog     every stored ``rule`` convention judged against the code.
-                Evidence is gathered per rule type — governed sites and a
-                conformance ratio where sites are countable (naming,
-                require_in, require), file dispersion where they are not
-                (forbid, analysis) — and folded into a four-way verdict:
-                    adopt                   dominant practice, lock it in
-                    fix_first               minority violations, clean up
-                                            then adopt
-                    conflicts               the codebase does the opposite;
-                                            adopting the rule would fight it
-                    insufficient_evidence   too few governed sites to judge
-    proposals   naming conventions mined from the codebase that the catalog
-                does not cover yet. A style is proposed only when it is
-                dominant AND has the most *exclusive* evidence (samples that
-                match no competing style), so ambiguous identifiers like
-                ``fetch`` — valid camelCase and snake_case at once — never
-                manufacture a convention. Each proposal is self-verified
-                with the rule engine before being returned, so it can be
-                inserted via ``ConventionStore.add`` as-is.
+    countable sites   naming (captured identifiers), require_in (scopes),
+                      require (files), analysis (the analyzer's candidate
+                      population, e.g. interfaces with >= 2 optional
+                      properties) -> a true conformance ratio
+    file dispersion   forbid, and analysis rules without a candidate
+                      counter — you cannot count the times a forbidden
+                      construct was *not* used, so verdicts fall back to
+                      how widely violations spread across files
+
+and folded into a four-way verdict:
+
+    adopt                   dominant practice, lock it in
+    fix_first               minority violations, clean up then adopt
+    conflicts               the codebase does the opposite; adopting the
+                            rule would fight it
+    insufficient_evidence   too few governed sites to judge
 
 No LLM anywhere: for a given (codebase, store) pair the report is
 byte-for-byte reproducible.
@@ -35,31 +35,28 @@ from typing import Any
 
 from tree_sitter import Node
 
-from ..astcore.analyzers import get_analyzer
+from ..astcore.analyzers import ANALYZER_SITES, get_analyzer
 from ..astcore.parser import (
     language_for_path,
     parse,
     resolve_dialect,
     rule_languages,
 )
-from ..astcore.rules import Rule, RuleError, RuleEngine, _compile, _matches, validate_rule
+from ..astcore.rules import Rule, RuleError, _compile, _matches
 from ..agent.steps import _drop_overridden
 from .store import Convention, ConventionStore
 
 _SKIP_DIRS = {".git", "node_modules", "__pycache__", ".venv", "venv", "dist",
                "build", "target", ".next", ".tox", "vendor"}
 
-# verdict thresholds (documented in TASK-0010)
+# verdict thresholds (documented in TASK-0010/0011)
 ADOPT_CONFORMANCE = 0.9    # sites conforming ratio for straight adoption
 FIX_FIRST_CONFORMANCE = 0.5
-FIX_FIRST_FILE_RATIO = 0.2  # forbid/analysis: violating-file dispersion cap
+FIX_FIRST_FILE_RATIO = 0.2  # dispersion-judged rules: violating-file cap
 MIN_SITES = 5              # countable evidence needed for a verdict
-MIN_FILES = 3              # forbid/analysis evidence needed for a verdict
+MIN_FILES = 3              # dispersion-judged evidence needed for a verdict
 SATURATION_SITES = 20      # evidence count at which confidence stops growing
 MAX_LISTED = 5             # violating files / counter-examples listed
-
-
-# --------------------------------------------------------------- evidence
 
 
 @dataclass
@@ -76,17 +73,18 @@ class _RuleStats:
 def _count_sites(rule: Rule, root: Node, language: str) -> tuple[int | None, int, list[str]]:
     """(governed sites or None, violations, counter-example texts) for one file.
 
-    Site semantics per rule type:
-        naming      every captured identifier is a site
-        require_in  every scope match is a site
-        require     the file itself is the single site
-        forbid      sites are not countable — you cannot count the times a
-                    construct was *not* used; only violations are observable
-        analysis    same: analyzers report violations, not opportunities
+    Site semantics follow ``astcore.rules.governed_sites`` — naming counts
+    captured identifiers, require_in counts scopes, require counts the file,
+    analysis counts the analyzer's candidate population. forbid stays
+    uncountable here on purpose: for an *adoption* verdict the population
+    of "places the construct was avoided" does not exist, so forbid rules
+    are judged by violation dispersion instead.
     """
     if rule.type == "analysis":
         found = get_analyzer(rule.analyzer or "")(root, rule, language)
-        return None, len(found), [v.snippet or v.message for v in found]
+        counter = ANALYZER_SITES.get(rule.analyzer or "")
+        sites = counter(root) if counter else None
+        return sites, len(found), [v.snippet or v.message for v in found]
 
     query = _compile(language, rule.query)
     if rule.type == "naming":
@@ -153,7 +151,7 @@ def _verdict(stats: _RuleStats, min_sites: int) -> tuple[str, float, str]:
                     detail + " — clean up the minority violations, then adopt")
         return ("conflicts", confidence,
                 detail + " — the codebase leans the other way")
-    # forbid/analysis: judge by how widely violations are dispersed
+    # not countable: judge by how widely violations are dispersed
     if stats.checked_files < MIN_FILES:
         return ("insufficient_evidence", 0.0,
                 f"only {stats.checked_files} file(s) checked; need {MIN_FILES}")
@@ -168,166 +166,6 @@ def _verdict(stats: _RuleStats, min_sites: int) -> tuple[str, float, str]:
     if ratio <= FIX_FIRST_FILE_RATIO:
         return "fix_first", confidence, detail + " — contained; fix then adopt"
     return "conflicts", confidence, detail + " — widespread current practice"
-
-
-# ----------------------------------------------------------------- mining
-
-
-@dataclass(frozen=True)
-class _MiningTarget:
-    construct: str          # human name: "function", "class", ...
-    query: str              # tree-sitter query with a @name capture
-    example: str            # declaration template, {name} placeholder
-
-
-_STYLES: tuple[tuple[str, str], ...] = (
-    ("camelCase", r"[a-z][a-zA-Z0-9]*"),
-    ("PascalCase", r"[A-Z][a-zA-Z0-9]*"),
-    ("snake_case", r"_{0,2}[a-z][a-z0-9_]*_{0,2}"),
-    ("SCREAMING_SNAKE_CASE", r"[A-Z][A-Z0-9_]*"),
-)
-
-# names guaranteed to violate at least one style each; the first one that
-# fails the winning regex becomes the proposal's bad_example
-_BAD_NAME_CANDIDATES = ("Bad_Name", "badName", "BadName", "bad_name")
-
-# go/java/rust are deliberately absent: their node names are unverified here
-# and a silently wrong query would mine nothing (or nonsense). Catalog
-# verdicts still cover them; extend after grammar checks (TASK-0010 handoff).
-_MINING_TARGETS: dict[str, tuple[_MiningTarget, ...]] = {
-    "python": (
-        _MiningTarget("function", "(function_definition name: (identifier) @name)",
-                      "def {name}():\n    pass\n"),
-        _MiningTarget("class", "(class_definition name: (identifier) @name)",
-                      "class {name}:\n    pass\n"),
-    ),
-    "javascript": (
-        _MiningTarget("function", "(function_declaration name: (identifier) @name)",
-                      "function {name}() {{}}\n"),
-        _MiningTarget("class", "(class_declaration name: (identifier) @name)",
-                      "class {name} {{}}\n"),
-    ),
-    "typescript": (
-        _MiningTarget("function", "(function_declaration name: (identifier) @name)",
-                      "function {name}() {{}}\n"),
-        _MiningTarget("class", "(class_declaration name: (type_identifier) @name)",
-                      "class {name} {{}}\n"),
-        _MiningTarget("interface", "(interface_declaration name: (type_identifier) @name)",
-                      "interface {name} {{ x: number; }}\n"),
-        _MiningTarget("type alias", "(type_alias_declaration name: (type_identifier) @name)",
-                      "type {name} = string;\n"),
-    ),
-}
-
-
-def _normalize_query(query: str) -> str:
-    return " ".join(query.split())
-
-
-def _mine_naming(
-    store: ConventionStore,
-    names_by_target: dict[tuple[str, _MiningTarget], list[str]],
-    min_sites: int,
-) -> list[dict[str, Any]]:
-    """Turn collected identifiers into self-verified naming-rule proposals."""
-    catalog_naming = {
-        (conv.language, _normalize_query(conv.rule.query))
-        for conv in store.list(kind="rule")
-        if conv.rule is not None and conv.rule.type == "naming"
-    }
-    engine = RuleEngine()
-    proposals: list[dict[str, Any]] = []
-    for (language, target), names in sorted(
-        names_by_target.items(), key=lambda kv: (kv[0][0], kv[0][1].construct)
-    ):
-        if (language, _normalize_query(target.query)) in catalog_naming:
-            continue  # already governed by a stored rule; judged in `catalog`
-        if len(names) < min_sites:
-            continue
-
-        compiled = [(style, re.compile(regex)) for style, regex in _STYLES]
-        matches_per_name = [
-            {style for style, pattern in compiled if pattern.fullmatch(name)}
-            for name in names
-        ]
-        scored = []  # (style, regex, conforming, exclusive)
-        for style, regex in _STYLES:
-            conforming = sum(1 for m in matches_per_name if style in m)
-            exclusive = sum(1 for m in matches_per_name if m == {style})
-            scored.append((style, regex, conforming, exclusive))
-        # dominant = highest conformance; deterministic tie-break on style order
-        style, regex, conforming, exclusive = max(
-            scored, key=lambda s: (s[2], s[3], -_style_rank(s[0])))
-        conformance = conforming / len(names)
-        if conformance < ADOPT_CONFORMANCE:
-            continue
-        # require strictly-leading exclusive evidence: without a sample that
-        # matches ONLY this style, the choice between overlapping styles
-        # (fetch -> camelCase AND snake_case) would be arbitrary
-        rivals = max((s[3] for s in scored if s[0] != style), default=0)
-        if exclusive == 0 or exclusive <= rivals:
-            continue
-
-        good_name = next(
-            (n for n, m in zip(names, matches_per_name) if m == {style}))
-        bad_name = next(
-            n for n in _BAD_NAME_CANDIDATES if not re.fullmatch(regex, n))
-        slug = re.sub(r"[^a-z0-9]+", "-", target.construct.lower()).strip("-")
-        rule = Rule(
-            id=f"mined-{language}-{slug}-naming",
-            language=language,
-            type="naming",
-            query=target.query,
-            message=f"{target.construct} names must be {style}",
-            capture="name",
-            regex=regex,
-        )
-        convention = {
-            "id": rule.id,
-            "kind": "rule",
-            "language": language,
-            "title": f"{target.construct} names are {style} (mined)",
-            "guideline": (
-                f"Mined from the codebase: {conforming}/{len(names)} "
-                f"{target.construct} names are {style} "
-                f"({exclusive} unambiguously so)."),
-            "metadata": {"category": "naming", "tags": ["mined"]},
-            "rule": rule.to_dict(),
-            "good_example": target.example.format(name=good_name),
-            "bad_example": target.example.format(name=bad_name),
-        }
-        # same self-verification the store performs on insert
-        validate_rule(rule)
-        if engine.check(convention["bad_example"], language, [rule]).violations \
-                and not engine.check(convention["good_example"], language, [rule]).violations:
-            counter = sorted(
-                {n for n, m in zip(names, matches_per_name) if style not in m}
-            )[:MAX_LISTED]
-            saturation = min(1.0, len(names) / SATURATION_SITES)
-            proposals.append({
-                "id": rule.id,
-                "title": convention["title"],
-                "verdict": "propose",
-                "confidence": round(conformance * saturation, 4),
-                "reason": (
-                    f"{conforming}/{len(names)} {target.construct} names are "
-                    f"{style}; {exclusive} match no other style"),
-                "evidence": {
-                    "sites": len(names),
-                    "conforming": conforming,
-                    "exclusive": exclusive,
-                    "counter_examples": counter,
-                },
-                "convention": convention,
-            })
-    return proposals
-
-
-def _style_rank(style: str) -> int:
-    return next(i for i, (name, _) in enumerate(_STYLES) if name == style)
-
-
-# ------------------------------------------------------------------ scan
 
 
 def _source_files(root: Path, language: str | None, max_files: int
@@ -356,9 +194,8 @@ def recommend_rules(
     language: str | None = None,
     max_files: int = 500,
     min_sites: int = MIN_SITES,
-    mine: bool = True,
 ) -> dict[str, Any]:
-    """Scan ``root`` and recommend conventions. Deterministic, LLM-free."""
+    """Scan ``root`` and judge every stored rule. Deterministic, LLM-free."""
     root = Path(root).resolve()
     if not root.exists():
         raise FileNotFoundError(str(root))
@@ -367,7 +204,6 @@ def recommend_rules(
     lang_counts: dict[str, int] = {}
     stats: dict[str, _RuleStats] = {}
     rules_by_id: dict[str, tuple[Convention, Rule]] = {}
-    names_by_target: dict[tuple[str, _MiningTarget], list[str]] = {}
     rules_cache: dict[str, list[tuple[Convention, Rule]]] = {}
 
     for path, file_lang in files:
@@ -412,20 +248,6 @@ def recommend_rules(
                 entry.violating_files.add(rel)
                 entry.counter_examples.extend(examples)
 
-        if mine:
-            # dialects mine into their base language (tsx -> typescript)
-            mining_lang = rule_languages(file_lang)[-1]
-            for target in _MINING_TARGETS.get(mining_lang, ()):
-                try:
-                    query = _compile(file_lang, target.query)
-                except RuleError:
-                    continue
-                bucket = names_by_target.setdefault((mining_lang, target), [])
-                for captures in _matches(query, tree.root_node):
-                    for node in captures.get("name", []):
-                        bucket.append(
-                            (node.text or b"").decode("utf-8", errors="replace"))
-
     catalog: list[dict[str, Any]] = []
     for conv_id in sorted(stats):
         conv, rule = rules_by_id[conv_id]
@@ -452,14 +274,10 @@ def recommend_rules(
     catalog.sort(key=lambda r: (_VERDICT_ORDER[r["verdict"]],
                                 -r["confidence"], r["id"]))
 
-    proposals = _mine_naming(store, names_by_target, min_sites) if mine else []
-    proposals.sort(key=lambda p: (-p["confidence"], p["id"]))
-
     return {
         "root": str(root),
         "files": len(files),
         "skipped": skipped,
         "languages": dict(sorted(lang_counts.items())),
         "catalog": catalog,
-        "proposals": proposals,
     }

@@ -290,6 +290,52 @@ ANALYZERS: dict[str, Callable[[Node, Rule, str], list[RuleViolation]]] = {
 }
 
 
+def optional_variant_bag_sites(root: Node) -> int:
+    """Candidate population of ``optional_variant_bag``: interfaces with
+    >= 2 optional properties. Every violation comes from this set, so
+    violations / sites is a true conformance ratio."""
+    count = 0
+    for iface in _walk(root):
+        if iface.type != "interface_declaration":
+            continue
+        body = iface.child_by_field_name("body")
+        if body is None:
+            continue
+        optional = sum(
+            1 for prop in body.named_children
+            if prop.type == "property_signature"
+            and any(child.type == "?" for child in prop.children)
+        )
+        if optional >= 2:
+            count += 1
+    return count
+
+
+def record_key_inference_sites(root: Node) -> int:
+    """Candidate population of ``record_key_inference``: variable
+    declarators annotated as string-keyed maps (``Record<string, V>`` or
+    an index signature). Un-flagged candidates are presumed genuinely
+    open maps — i.e. conforming."""
+    count = 0
+    for decl in _walk(root):
+        if decl.type != "variable_declarator":
+            continue
+        annotation = decl.child_by_field_name("type")
+        if annotation is not None and _annotates_string_keyed_map(annotation):
+            count += 1
+    return count
+
+
+# analyzer name -> candidate-site counter. Lets analysis rules report how
+# many sites they govern (rules.governed_sites), not just how many they
+# flag — the difference between "no violations because nothing applied"
+# and "many candidates, all conforming".
+ANALYZER_SITES: dict[str, Callable[[Node], int]] = {
+    "optional-variant-bag": optional_variant_bag_sites,
+    "record-key-inference": record_key_inference_sites,
+}
+
+
 def get_analyzer(name: str) -> Callable[[Node, Rule, str], list[RuleViolation]]:
     if name not in ANALYZERS:
         raise KeyError(name)

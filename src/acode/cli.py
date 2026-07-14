@@ -83,8 +83,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--max-files", type=int, default=500)
     p.add_argument("--min-sites", type=int, default=5,
                    help="governed sites needed before a verdict is issued")
-    p.add_argument("--no-mining", action="store_true",
-                   help="skip mining new naming-rule proposals")
 
     p = sub.add_parser(
         "generate", help="generate code via the pipeline (RAG -> LLM -> verify -> repair)")
@@ -202,7 +200,6 @@ def main(argv: list[str] | None = None) -> int:
         report = recommend_rules(
             store, args.path, language=args.language,
             max_files=args.max_files, min_sites=args.min_sites,
-            mine=not args.no_mining,
         )
         json.dump(report, sys.stdout, ensure_ascii=False, indent=2)
         print()

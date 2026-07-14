@@ -14,8 +14,8 @@ Tools:
     list_conventions    enumerate stored conventions
     delete_convention   remove a convention
     index_codebase      ingest a repo's code shapes as retrieval patterns
-    recommend_rules     evidence-based rule adoption verdicts + mined
-                        naming-rule proposals for a codebase (no LLM)
+    recommend_rules     evidence-based adoption verdicts for every stored
+                        rule against a codebase, simple and complex (no LLM)
 
 check_code / search_conventions never call an LLM, so their output is
 reproducible byte-for-byte; generate/review responses always embed the
@@ -91,7 +91,10 @@ def build_server(config: AcodeConfig | None = None,
         """Hybrid convention search. Deterministic: hard metadata filter,
         then a weighted blend of BM25 (`query` keywords), AST-fingerprint
         similarity (`code` — pass the code being modified so the closest
-        patterns rank first), and metadata overlap."""
+        patterns rank first), rule applicability (how many sites in `code`
+        each rule structurally governs — this is what surfaces complex
+        analysis rules whose preconditions match even before a violation
+        exists), and metadata overlap."""
         hits = store.search(
             language=language,
             metadata=_metadata_from(framework, category, tags),
@@ -271,19 +274,19 @@ def build_server(config: AcodeConfig | None = None,
         language: str | None = None,
         max_files: int = 500,
         min_sites: int = 5,
-        mine: bool = True,
     ) -> str:
-        """Scan a codebase and recommend conventions, deterministically.
-        `catalog` judges every stored rule against the code (adopt /
-        fix_first / conflicts / insufficient_evidence, with per-rule
-        evidence: governed sites, conformance, violating files).
-        `proposals` are naming rules mined from the code itself — each is
-        self-verified and can be passed to add_convention as-is."""
+        """Scan a codebase (or a single file) and judge every stored rule
+        against it, deterministically: adopt / fix_first / conflicts /
+        insufficient_evidence, with per-rule evidence — governed sites,
+        conformance ratio, violating files. Covers the whole rule
+        complexity spectrum: analysis rules count their candidate
+        populations (e.g. interfaces with >= 2 optional properties), so
+        their verdicts are as evidence-based as simple naming rules."""
         from ..rag.recommend import recommend_rules as _recommend
 
         report = _recommend(
             store, path, language=language, max_files=max_files,
-            min_sites=min_sites, mine=mine,
+            min_sites=min_sites,
         )
         return json.dumps(report, ensure_ascii=False, indent=2)
 

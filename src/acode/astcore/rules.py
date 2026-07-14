@@ -204,6 +204,41 @@ def _violation(rule: Rule, node: Node | None, message: str | None = None) -> Rul
     )
 
 
+def governed_sites(rule: Rule, root: Node, language: str) -> int | None:
+    """How many sites in ``root`` the rule governs — its structural
+    applicability to the code, across the whole complexity spectrum:
+
+        naming      captured identifiers
+        require_in  scope matches
+        require     1 — the rule governs the file as a whole
+        forbid      matches of the forbidden construct
+        analysis    the analyzer's candidate population (ANALYZER_SITES);
+                    None when the analyzer declares no counter
+
+    Raises RuleError when the query does not compile under ``language``
+    (e.g. a dialect grammar lacking a node type).
+    """
+    if rule.type == "analysis":
+        from .analyzers import ANALYZER_SITES
+
+        counter = ANALYZER_SITES.get(rule.analyzer or "")
+        return counter(root) if counter else None
+    if rule.type == "require":
+        return 1
+    query = _compile(language, rule.query)
+    if rule.type == "require_in":
+        scope_query = _compile(language, rule.scope_query or "")
+        return len(_matches(scope_query, root))
+    if rule.type == "naming":
+        return sum(
+            len(captures.get(rule.capture or "", []))
+            for captures in _matches(query, root)
+        )
+    if rule.type == "forbid":
+        return len(_matches(query, root))
+    raise RuleError(f"unknown rule type {rule.type!r}")
+
+
 class RuleEngine:
     """Executes rules against source code. Pure, deterministic, LLM-free."""
 
