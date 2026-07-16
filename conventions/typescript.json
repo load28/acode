@@ -267,18 +267,18 @@
     "id": "ts-no-duplicate-literal-union",
     "kind": "rule",
     "language": "typescript",
-    "title": "No repeated inline literal unions — extract a named alias",
-    "guideline": "A literal union written inline in several places (same member set, any order) has no single source of truth: adding a member means hunting down every copy. Extract it into one named type alias and reference that. Alias declarations themselves are never flagged; when an alias for the set already exists the fix is to use it.",
-    "metadata": {"category": "types", "tags": ["typescript", "union", "dry", "alias"]},
+    "title": "No repeated inline literal unions — derive one type from an as const object",
+    "guideline": "A literal union written inline in several places (same member set, any order) has no single source of truth: adding a member means hunting down every copy. Hold the values in an `as const` object and derive the union from it (`type T = typeof Obj[keyof typeof Obj]`, same shape as the enum replacement) — the set then changes in one place, and use sites reference `Obj.Member` constants instead of scattering raw literals. Alias declarations themselves are never flagged; when an alias for the set already exists the fix is to use it.",
+    "metadata": {"category": "types", "tags": ["typescript", "union", "dry", "as-const"]},
     "rule": {
       "id": "ts-no-duplicate-literal-union",
       "language": "typescript",
       "type": "analysis",
       "analyzer": "duplicate-literal-union",
       "query": "",
-      "message": "literal union is repeated inline; extract it into a named type alias"
+      "message": "literal union is repeated inline; derive one union type from an as const object"
     },
-    "good_example": "type Size = 'sm' | 'md' | 'lg';\n\nfunction badge(size: Size): string {\n  return size;\n}\n\nfunction icon(size: Size): string {\n  return size;\n}\n",
+    "good_example": "const Size = {\n  Sm: 'sm',\n  Md: 'md',\n  Lg: 'lg',\n} as const;\n\ntype Size = typeof Size[keyof typeof Size];\n\nfunction badge(size: Size): string {\n  return size;\n}\n\nfunction icon(size: Size): string {\n  return size;\n}\n",
     "bad_example": "function badge(size: 'sm' | 'md' | 'lg'): string {\n  return size;\n}\nfunction icon(size: 'sm' | 'md' | 'lg'): string {\n  return size;\n}\n"
   },
   {

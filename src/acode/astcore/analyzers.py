@@ -481,7 +481,8 @@ def duplicate_literal_union(root: Node, rule: Rule, language: str) -> list[RuleV
     keyed by the (order-insensitive) member set. A set occurring >= 2 times
     flags each *inline* occurrence; occurrences that are the body of a
     ``type X = ...`` alias are never flagged — when one exists its name is
-    suggested, otherwise the message asks to extract one.
+    suggested, otherwise the fix is the repo's enum-replacement shape: an
+    ``as const`` object holding the values plus the derived union type.
     """
     unions: dict[frozenset, list[tuple[Node, bool, str | None]]] = {}
     for node in _walk(root):
@@ -513,7 +514,10 @@ def duplicate_literal_union(root: Node, rule: Rule, language: str) -> list[RuleV
             if alias:
                 fix = f"use the existing alias '{alias}'"
             else:
-                fix = "extract a named type alias"
+                fix = (
+                    "hold the values in an `as const` object and derive the "
+                    "union (`type T = typeof Obj[keyof typeof Obj]`)"
+                )
             violations.append(
                 _violation(
                     rule,

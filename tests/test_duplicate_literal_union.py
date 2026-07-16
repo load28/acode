@@ -40,7 +40,9 @@ def test_repeated_inline_union_flags_each_occurrence():
     )
     report = check(code)
     assert len(report.violations) == 2
-    assert all("extract a named type alias" in v.message for v in report.violations)
+    # the suggested fix is the as const + derived-union shape
+    assert all("as const" in v.message for v in report.violations)
+    assert all("keyof typeof" in v.message for v in report.violations)
 
 
 def test_existing_alias_is_suggested_by_name():
