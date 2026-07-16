@@ -4,7 +4,7 @@
 > 규칙: [/CLAUDE.md](../../CLAUDE.md) · 새 태스크: [TEMPLATE.md](TEMPLATE.md) 복사
 > 상태: `todo` 착수 전 · `in_progress` 진행 중 · `blocked` 대기(문서에 사유) · `done` 완료+검증
 
-**마지막 태스크 번호: 0010** (새 태스크는 0011부터)
+**마지막 태스크 번호: 0011** (새 태스크는 0012부터)
 
 | ID | 제목 | 상태 | 시작 | 완료 | 주요 파일 |
 |---|---|---|---|---|---|
@@ -21,6 +21,8 @@
 | [TASK-0009](TASK-0009-record-key-inference-analyzer.md) | Record 키 넓힘 검출 — record-key-inference 분석기 | done | 2026-07-13 | 2026-07-13 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_record_key_inference.py` |
 
 | [TASK-0010](TASK-0010-four-new-ts-analyzers.md) | TS 분석기 4종 (boolean-variant-bag, stringly-literal-param, duplicate-literal-union, as-const-candidate) | done | 2026-07-16 | 2026-07-16 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_boolean_variant_bag.py`, `tests/test_stringly_literal_param.py`, `tests/test_duplicate_literal_union.py`, `tests/test_as_const_candidate.py` |
+
+| [TASK-0011](TASK-0011-literal-union-param-as-const-style.md) | literal-union-param 제안을 as const 파생 타입 스타일로 | done | 2026-07-16 | 2026-07-16 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_stringly_literal_param.py` |
 
 ## 열린 태스크 (todo / in_progress / blocked)
 

@@ -43,6 +43,9 @@ def test_closed_literal_call_set_is_flagged():
     message = report.violations[0].message
     assert "'align'" in message
     assert "'left' | 'right'" in message
+    # the suggested fix is the as const + derived-union shape
+    assert "as const" in message
+    assert "keyof typeof" in message
 
 
 def test_multiple_string_params_are_checked_independently():

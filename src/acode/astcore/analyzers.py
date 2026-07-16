@@ -466,7 +466,9 @@ def stringly_literal_param(root: Node, rule: Rule, language: str) -> list[RuleVi
                         param_name,
                         f"parameter '{_text(param_name)}' of '{func_name}' is "
                         f"typed string but every call passes one of {union} — "
-                        f"narrow it to that literal union (or a named alias)",
+                        f"hold the values in an `as const` object and type the "
+                        f"parameter with the derived union "
+                        f"(`type T = typeof Obj[keyof typeof Obj]`)",
                     )
                 )
     return violations

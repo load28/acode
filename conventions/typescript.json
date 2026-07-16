@@ -250,17 +250,17 @@
     "kind": "rule",
     "language": "typescript",
     "title": "No stringly-typed parameters over a closed value set",
-    "guideline": "A parameter typed `string` whose call sites only ever pass a fixed set of literals is stringly-typed: narrow it to a literal union (or a named alias) so typos fail to compile and completions list the valid values. Flagged mechanically when every direct call in the file passes a string literal and at least two distinct values occur; exported functions and indirectly referenced functions are exempt (outside callers are invisible).",
-    "metadata": {"category": "types", "tags": ["typescript", "strict", "union", "stringly-typed"]},
+    "guideline": "A parameter typed `string` whose call sites only ever pass a fixed set of literals is stringly-typed. Hold the values in an `as const` object and type the parameter with the union derived from it (`type T = typeof Obj[keyof typeof Obj]`, same shape as the enum replacement) so typos fail to compile, completions list the valid values, and call sites reference `Obj.Member` instead of raw strings. Flagged mechanically when every direct call in the file passes a string literal and at least two distinct values occur; exported functions and indirectly referenced functions are exempt (outside callers are invisible).",
+    "metadata": {"category": "types", "tags": ["typescript", "strict", "union", "stringly-typed", "as-const"]},
     "rule": {
       "id": "ts-prefer-literal-union-param",
       "language": "typescript",
       "type": "analysis",
       "analyzer": "stringly-literal-param",
       "query": "",
-      "message": "string parameter is only ever called with a closed literal set; narrow it to a literal union"
+      "message": "string parameter is only ever called with a closed literal set; derive the union from an as const object"
     },
-    "good_example": "type Align = 'left' | 'right';\n\nfunction alignLabel(align: Align): string {\n  return align;\n}\n\nalignLabel('left');\n",
+    "good_example": "const Align = {\n  Left: 'left',\n  Right: 'right',\n} as const;\n\ntype Align = typeof Align[keyof typeof Align];\n\nfunction alignLabel(align: Align): string {\n  return align;\n}\n\nalignLabel(Align.Left);\n",
     "bad_example": "function alignLabel(align: string): string {\n  return align;\n}\nalignLabel('left');\nalignLabel('right');\n"
   },
   {
