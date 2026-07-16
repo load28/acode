@@ -284,9 +284,356 @@ def record_key_inference(root: Node, rule: Rule, language: str) -> list[RuleViol
     return violations
 
 
+def _pair_value(entry: Node) -> Node | None:
+    if entry.type != "pair":
+        return None
+    return entry.child_by_field_name("value")
+
+
+def boolean_variant_bag(root: Node, rule: Rule, language: str) -> list[RuleViolation]:
+    """Flag interfaces whose boolean flags behave as exclusive states.
+
+    Candidates: interfaces with >= 2 boolean properties. Evidence comes
+    from usage only — object literals in the file typed as the interface
+    (``: I``, ``satisfies I``, ``as I``):
+
+    - a flag ever assigned a non-literal value -> exclusivity is unprovable
+      -> silence;
+    - two flags ever true in the same literal -> the flags are independent
+      -> silence;
+    - otherwise, >= 2 distinct flags each appearing as the sole true flag
+      of some usage prove the booleans model exclusive states -> violation,
+      pointing at a status literal-union instead.
+    """
+    violations = []
+    for iface in _walk(root):
+        if iface.type != "interface_declaration":
+            continue
+        name_node = iface.child_by_field_name("name")
+        body = iface.child_by_field_name("body")
+        if name_node is None or body is None:
+            continue
+        iface_name = _text(name_node)
+
+        flags = set()
+        for prop in body.named_children:
+            if prop.type != "property_signature":
+                continue
+            prop_name = prop.child_by_field_name("name")
+            annotation = prop.child_by_field_name("type")
+            if prop_name is None or annotation is None:
+                continue
+            is_boolean = any(
+                c.type == "predefined_type" and _text(c) == "boolean"
+                for c in annotation.named_children
+            )
+            if is_boolean:
+                flags.add(_text(prop_name))
+        if len(flags) < 2:
+            continue
+
+        true_sets = []
+        provable = True
+        for type_name, obj in _typed_object_literals(root):
+            if type_name != iface_name:
+                continue
+            true_flags = set()
+            for entry in obj.named_children:
+                if (
+                    entry.type in ("shorthand_property_identifier", "spread_element")
+                    and (entry.type == "spread_element" or _text(entry) in flags)
+                ):
+                    provable = False  # variable/spread flag value: unprovable
+                    break
+                key = entry.child_by_field_name("key") if entry.type == "pair" else None
+                if key is None or _text(key) not in flags:
+                    continue
+                value = _pair_value(entry)
+                if value is None or value.type not in ("true", "false"):
+                    provable = False  # dynamic flag value: exclusivity unprovable
+                    break
+                if value.type == "true":
+                    true_flags.add(_text(key))
+            if not provable or len(true_flags) >= 2:
+                provable = False  # co-occurring true flags: independent booleans
+                break
+            true_sets.append(frozenset(true_flags))
+        if not provable:
+            continue
+
+        sole_true = {next(iter(s)) for s in true_sets if len(s) == 1}
+        if len(sole_true) < 2:
+            continue
+        violations.append(
+            _violation(
+                rule,
+                name_node,
+                f"interface '{iface_name}' models exclusive states with boolean "
+                f"flags ({', '.join(sorted(sole_true))} are never true together "
+                f"and each appears as the sole true flag) — replace them with a "
+                f"single literal-union status key",
+            )
+        )
+    return violations
+
+
+def _identifier_used_outside_calls(root: Node, name: str, decl: Node) -> bool:
+    """True if ``name`` is referenced anywhere except as the callee of a
+    call or its own declaration — evidence of indirect calls we cannot see."""
+    for node in _walk(root):
+        if node.type != "identifier" or _text(node) != name:
+            continue
+        parent = node.parent
+        if parent is None:
+            continue
+        if parent.type == "call_expression" and parent.child_by_field_name("function") == node:
+            continue
+        if parent == decl:  # the declaration's own name
+            continue
+        return True
+    return False
+
+
+def stringly_literal_param(root: Node, rule: Rule, language: str) -> list[RuleViolation]:
+    """Flag ``string`` parameters that every call site fills from a closed
+    literal set.
+
+    Candidates: non-exported function declarations with a parameter typed
+    exactly ``string``. Evidence: >= 2 direct calls in the file, every call
+    passes that argument as a string literal, and >= 2 distinct values occur
+    — the parameter's domain is a closed union the type should carry.
+    Silence when the function is exported (outside callers are invisible),
+    when its identifier is referenced outside direct calls (indirect calls),
+    or when any call passes a non-literal / omits the argument.
+    """
+    violations = []
+    for func in _walk(root):
+        if func.type != "function_declaration":
+            continue
+        parent = func.parent
+        if parent is not None and parent.type == "export_statement":
+            continue
+        name_node = func.child_by_field_name("name")
+        params = func.child_by_field_name("parameters")
+        if name_node is None or params is None:
+            continue
+        func_name = _text(name_node)
+        if _identifier_used_outside_calls(root, func_name, func):
+            continue
+
+        string_params = []  # (index, param name node)
+        positional = [
+            p for p in params.named_children
+            if p.type in ("required_parameter", "optional_parameter")
+        ]
+        for index, param in enumerate(positional):
+            annotation = param.child_by_field_name("type")
+            if annotation is None:
+                continue
+            named = annotation.named_children
+            if len(named) == 1 and named[0].type == "predefined_type" and _text(named[0]) == "string":
+                pattern = param.child_by_field_name("pattern")
+                if pattern is not None and pattern.type == "identifier":
+                    string_params.append((index, pattern))
+        if not string_params:
+            continue
+
+        calls = [
+            node.child_by_field_name("arguments")
+            for node in _walk(root)
+            if node.type == "call_expression"
+            and (callee := node.child_by_field_name("function")) is not None
+            and callee.type == "identifier"
+            and _text(callee) == func_name
+        ]
+        if len(calls) < 2:
+            continue
+
+        for index, param_name in string_params:
+            values = set()
+            closed = True
+            for arguments in calls:
+                args = arguments.named_children if arguments is not None else []
+                if index >= len(args) or args[index].type != "string":
+                    closed = False
+                    break
+                values.add(_text(args[index]).strip("'\""))
+            if closed and len(values) >= 2:
+                union = " | ".join(f"'{v}'" for v in sorted(values))
+                violations.append(
+                    _violation(
+                        rule,
+                        param_name,
+                        f"parameter '{_text(param_name)}' of '{func_name}' is "
+                        f"typed string but every call passes one of {union} — "
+                        f"narrow it to that literal union (or a named alias)",
+                    )
+                )
+    return violations
+
+
+def duplicate_literal_union(root: Node, rule: Rule, language: str) -> list[RuleViolation]:
+    """Flag literal unions repeated inline instead of extracted to an alias.
+
+    Collects every top-level union type whose members are all literal types,
+    keyed by the (order-insensitive) member set. A set occurring >= 2 times
+    flags each *inline* occurrence; occurrences that are the body of a
+    ``type X = ...`` alias are never flagged — when one exists its name is
+    suggested, otherwise the message asks to extract one.
+    """
+    unions: dict[frozenset, list[tuple[Node, bool, str | None]]] = {}
+    for node in _walk(root):
+        if node.type != "union_type":
+            continue
+        parent = node.parent
+        if parent is not None and parent.type == "union_type":
+            continue  # only the outermost union node
+        leaves = _union_leaves(node)
+        if not leaves or not all(leaf.type == "literal_type" for leaf in leaves):
+            continue
+        key = frozenset(_text(leaf) for leaf in leaves)
+        alias_name = None
+        is_alias = parent is not None and parent.type == "type_alias_declaration"
+        if is_alias:
+            alias_id = parent.child_by_field_name("name")
+            alias_name = _text(alias_id) if alias_id is not None else None
+        unions.setdefault(key, []).append((node, is_alias, alias_name))
+
+    violations = []
+    for key, occurrences in unions.items():
+        if len(occurrences) < 2:
+            continue
+        alias = next((name for _, is_alias, name in occurrences if is_alias and name), None)
+        members = " | ".join(sorted(key))
+        for node, is_alias, _name in occurrences:
+            if is_alias:
+                continue
+            if alias:
+                fix = f"use the existing alias '{alias}'"
+            else:
+                fix = "extract a named type alias"
+            violations.append(
+                _violation(
+                    rule,
+                    node,
+                    f"literal union {members} appears {len(occurrences)} times "
+                    f"in this file — {fix} so the set has one source of truth",
+                )
+            )
+    return violations
+
+
+_LITERAL_VALUE_TYPES = ("string", "number", "true", "false")
+
+
+def _is_module_level_const(declarator: Node) -> bool:
+    decl = declarator.parent
+    if decl is None or decl.type != "lexical_declaration":
+        return False
+    if not any(child.type == "const" for child in decl.children):
+        return False
+    parent = decl.parent
+    if parent is None:
+        return False
+    if parent.type == "program":
+        return True
+    return parent.type == "export_statement" and (
+        parent.parent is not None and parent.parent.type == "program"
+    )
+
+
+def _has_direct_mutation(root: Node, var_name: str) -> bool:
+    """True if the file reassigns ``var_name``, writes/deletes one of its
+    properties, or passes it as Object.assign's first argument."""
+    for node in _walk(root):
+        if node.type in ("assignment_expression", "augmented_assignment_expression"):
+            left = node.child_by_field_name("left")
+            if left is None:
+                continue
+            if left.type == "identifier" and _text(left) == var_name:
+                return True
+            if left.type in ("member_expression", "subscript_expression"):
+                obj = left.child_by_field_name("object")
+                if obj is not None and obj.type == "identifier" and _text(obj) == var_name:
+                    return True
+        elif node.type == "unary_expression":
+            if any(c.type == "delete" for c in node.children):
+                operand = node.child_by_field_name("argument")
+                if operand is not None and operand.type in ("member_expression", "subscript_expression"):
+                    obj = operand.child_by_field_name("object")
+                    if obj is not None and obj.type == "identifier" and _text(obj) == var_name:
+                        return True
+        elif node.type == "call_expression":
+            callee = node.child_by_field_name("function")
+            arguments = node.child_by_field_name("arguments")
+            if (
+                callee is not None
+                and callee.type == "member_expression"
+                and _text(callee) == "Object.assign"
+                and arguments is not None
+            ):
+                args = arguments.named_children
+                if args and args[0].type == "identifier" and _text(args[0]) == var_name:
+                    return True
+    return False
+
+
+def as_const_candidate(root: Node, rule: Rule, language: str) -> list[RuleViolation]:
+    """Flag module-level const object literals that should be ``as const``.
+
+    Candidates: unannotated ``const X = { ... }`` at module level whose
+    entries are all plain identifier/string keys with primitive literal
+    values (string / number / boolean). Evidence of immutability: the file
+    never reassigns X, writes or deletes a property, or hands X to
+    ``Object.assign`` — then ``as const`` makes the literal's exact shape
+    available (``keyof typeof`` keys, literal value types) for free.
+    Mutation through aliases or callees is invisible — documented limit.
+    """
+    violations = []
+    for declarator in _walk(root):
+        if declarator.type != "variable_declarator":
+            continue
+        name_node = declarator.child_by_field_name("name")
+        value = declarator.child_by_field_name("value")
+        if (
+            name_node is None
+            or name_node.type != "identifier"
+            or declarator.child_by_field_name("type") is not None
+            or value is None
+            or value.type != "object"
+            or not _is_module_level_const(declarator)
+        ):
+            continue
+        keys = _static_object_keys(value)
+        if keys is None:
+            continue
+        if not all(
+            (v := _pair_value(entry)) is not None and v.type in _LITERAL_VALUE_TYPES
+            for entry in value.named_children
+        ):
+            continue
+        var_name = _text(name_node)
+        if _has_direct_mutation(root, var_name):
+            continue
+        violations.append(
+            _violation(
+                rule,
+                name_node,
+                f"'{var_name}' is a never-mutated literal constant — freeze it "
+                f"with `as const` so its keys and values become precise types "
+                f"(`keyof typeof {var_name}` for the key union)",
+            )
+        )
+    return violations
+
+
 ANALYZERS: dict[str, Callable[[Node, Rule, str], list[RuleViolation]]] = {
     "optional-variant-bag": optional_variant_bag,
     "record-key-inference": record_key_inference,
+    "boolean-variant-bag": boolean_variant_bag,
+    "stringly-literal-param": stringly_literal_param,
+    "duplicate-literal-union": duplicate_literal_union,
+    "as-const-candidate": as_const_candidate,
 }
 
 
