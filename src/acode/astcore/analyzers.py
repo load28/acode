@@ -633,13 +633,27 @@ def as_const_candidate(root: Node, rule: Rule, language: str) -> list[RuleViolat
     return violations
 
 
-def _as_const_string_members(root: Node) -> dict[str, dict[str, str]]:
-    """Map ``X = { K: 'v', ... } as const`` declarations to {value: member}.
+_MEMBER_VALUE_TYPES = ("string", "number")
 
-    Only identifier keys with string-literal values qualify — anything else
-    makes the ``X.Member`` suggestion unsound, so the object is dropped.
+
+def _literal_key(node: Node) -> tuple[str, str] | None:
+    """Canonical (kind, value) key for a string/number literal node."""
+    if node.type == "string":
+        return ("string", _text(node).strip("'\""))
+    if node.type == "number":
+        return ("number", _text(node))
+    return None
+
+
+def _as_const_members(root: Node) -> dict[str, dict[tuple[str, str], str]]:
+    """Map ``X = { K: 'v', ... } as const`` declarations to
+    {(kind, value): member} for string/number literal values.
+
+    Only identifier keys with string/number literal values qualify —
+    anything else makes the ``X.Member`` suggestion unsound, so the
+    whole object is dropped.
     """
-    objects: dict[str, dict[str, str]] = {}
+    objects: dict[str, dict[tuple[str, str], str]] = {}
     for declarator in _walk(root):
         if declarator.type != "variable_declarator":
             continue
@@ -656,20 +670,20 @@ def _as_const_string_members(root: Node) -> dict[str, dict[str, str]]:
         obj = next((c for c in value.named_children if c.type == "object"), None)
         if obj is None:
             continue
-        members: dict[str, str] = {}
+        members: dict[tuple[str, str], str] = {}
         for entry in obj.named_children:
             key = entry.child_by_field_name("key") if entry.type == "pair" else None
             val = _pair_value(entry)
-            if key is None or key.type != "property_identifier" or val is None or val.type != "string":
+            if key is None or key.type != "property_identifier" or val is None or val.type not in _MEMBER_VALUE_TYPES:
                 members = {}
                 break
-            members.setdefault(_text(val).strip("'\""), _text(key))
+            members.setdefault(_literal_key(val), _text(key))  # type: ignore[arg-type]
         if members:
             objects[_text(name_node)] = members
     return objects
 
 
-def _derived_union_aliases(root: Node, objects: dict[str, dict[str, str]]) -> dict[str, str]:
+def _derived_union_aliases(root: Node, objects: dict[str, dict[tuple[str, str], str]]) -> dict[str, str]:
     """Map ``type T = typeof X[keyof typeof X]`` aliases to their object X."""
     aliases: dict[str, str] = {}
     for alias in _walk(root):
@@ -697,111 +711,254 @@ def _derived_union_aliases(root: Node, objects: dict[str, dict[str, str]]) -> di
     return aliases
 
 
-def _annotated_alias_name(node: Node) -> str | None:
-    """The bare type-identifier a node's ``type`` annotation names, if any."""
-    annotation = node.child_by_field_name("type")
+_CALLABLE_NODE_TYPES = ("function_declaration", "function_expression", "arrow_function", "method_definition")
+_ARRAY_WRAPPER_TYPES = ("Array", "ReadonlyArray", "Set")
+
+# a typed slot: (alias name, container) where container is 'scalar' or 'array'
+_Slot = tuple[str, str]
+
+
+def _annotation_slot(node: Node, field: str = "type") -> _Slot | None:
+    """(type name, container) named by a node's type annotation: a bare
+    type-identifier ('scalar'), or one wrapped in ``T[]`` / ``Array<T>`` /
+    ``ReadonlyArray<T>`` / ``Set<T>`` ('array')."""
+    annotation = node.child_by_field_name(field)
     if annotation is None:
         return None
     named = annotation.named_children
-    if len(named) == 1 and named[0].type == "type_identifier":
-        return _text(named[0])
+    if len(named) != 1:
+        return None
+    t = named[0]
+    if t.type == "type_identifier":
+        return _text(t), "scalar"
+    if t.type == "array_type":
+        inner = t.named_children
+        if len(inner) == 1 and inner[0].type == "type_identifier":
+            return _text(inner[0]), "array"
+    if t.type == "generic_type":
+        parts = t.named_children
+        if (
+            len(parts) == 2
+            and parts[0].type == "type_identifier"
+            and _text(parts[0]) in _ARRAY_WRAPPER_TYPES
+            and parts[1].type == "type_arguments"
+        ):
+            args = parts[1].named_children
+            if len(args) == 1 and args[0].type == "type_identifier":
+                return _text(args[0]), "array"
     return None
 
 
-def constant_callsite(root: Node, rule: Rule, language: str) -> list[RuleViolation]:
-    """Flag raw string literals where a value typed by a union derived from
-    an ``as const`` object is expected — call arguments, variable
-    initializers, and parameter defaults should reference the object's
-    member instead, so value changes stay in one place.
+def _own_returns(body: Node) -> Iterator[Node]:
+    """Returned expressions belonging to this body — nested functions keep
+    their own return statements."""
+    stack = list(body.named_children)
+    while stack:
+        node = stack.pop()
+        if node.type in _CALLABLE_NODE_TYPES:
+            continue
+        if node.type == "return_statement":
+            if node.named_children:
+                yield node.named_children[0]
+            continue
+        stack.extend(node.named_children)
 
-    The full evidence chain must be visible in the file: the as const
-    object (identifier keys, string values), the derived alias
-    ``type T = typeof X[keyof typeof X]``, and a use site annotated ``T``
-    — a file-local function's parameter fed by a direct call, a typed
-    variable declarator, or a parameter default — receiving a string
-    literal that matches one of X's values. Literals outside X's values
-    are the compiler's job (type error) and stay silent.
+
+def constant_callsite(root: Node, rule: Rule, language: str) -> list[RuleViolation]:
+    """Flag raw string/number literals where a value typed by a union
+    derived from an ``as const`` object is expected — the use site should
+    reference the object's member instead, so value changes stay in one
+    place.
+
+    Covered use sites (the annotation may be the bare alias or an
+    ``T[]`` / ``Array<T>`` / ``ReadonlyArray<T>`` / ``Set<T>`` of it, in
+    which case array-literal elements are checked):
+
+    - arguments of direct calls to file-local functions — declarations,
+      arrow/function expressions bound to a const, and methods (a method
+      name defined with conflicting signatures is dropped as ambiguous);
+    - variable initializers and parameter defaults;
+    - reassignments of variables declared with the alias (a name
+      re-declared with a different slot type is dropped as ambiguous);
+    - returned expressions of functions whose return type is the alias
+      (arrow expression bodies included; nested functions keep their own);
+    - property values in object literals typed ``: I`` / ``satisfies I``
+      / ``as I`` where the interface/object-type property is the alias.
+
+    The full evidence chain must be visible in the file; literals outside
+    the object's values are the compiler's job (type error) and stay
+    silent. Cross-file tracking is out of scope by design.
     """
-    objects = _as_const_string_members(root)
+    objects = _as_const_members(root)
     if not objects:
         return []
     aliases = _derived_union_aliases(root, objects)
     if not aliases:
         return []
 
-    func_params: dict[str, dict[int, str]] = {}
-    for func in _walk(root):
-        if func.type != "function_declaration":
-            continue
-        name_node = func.child_by_field_name("name")
-        params = func.child_by_field_name("parameters")
-        if name_node is None or params is None:
-            continue
-        positional = [
-            p for p in params.named_children
-            if p.type in ("required_parameter", "optional_parameter")
-        ]
-        mapping = {}
-        for index, param in enumerate(positional):
-            type_name = _annotated_alias_name(param)
-            if type_name in aliases:
-                mapping[index] = type_name
-        if mapping:
-            func_params[_text(name_node)] = mapping
+    def slot(node: Node, field: str = "type") -> _Slot | None:
+        s = _annotation_slot(node, field)
+        return s if s is not None and s[0] in aliases else None
 
     violations = []
-    for node in _walk(root):
-        if node.type not in ("variable_declarator", "required_parameter", "optional_parameter"):
-            continue
-        type_name = _annotated_alias_name(node)
-        if type_name not in aliases:
-            continue
-        value = node.child_by_field_name("value")
-        if value is None or value.type != "string":
-            continue
-        raw = _text(value).strip("'\"")
-        obj_name = aliases[type_name]
-        member = objects[obj_name].get(raw)
-        if member is None:
-            continue
-        site = "a variable" if node.type == "variable_declarator" else "a parameter default"
-        violations.append(
-            _violation(
-                rule,
-                value,
-                f"raw literal '{raw}' initializes {site} typed '{type_name}' — "
-                f"reference the constant `{obj_name}.{member}` so value changes "
-                f"stay in one place",
-            )
-        )
-    for call in _walk(root):
-        if call.type != "call_expression":
-            continue
-        callee = call.child_by_field_name("function")
-        arguments = call.child_by_field_name("arguments")
-        if callee is None or callee.type != "identifier" or arguments is None:
-            continue
-        mapping = func_params.get(_text(callee))
-        if not mapping:
-            continue
-        args = arguments.named_children
-        for index, type_name in mapping.items():
-            if index >= len(args) or args[index].type != "string":
-                continue
-            raw = _text(args[index]).strip("'\"")
-            obj_name = aliases[type_name]
-            member = objects[obj_name].get(raw)
+
+    def report(value: Node, s: _Slot, phrase: str) -> None:
+        alias, container = s
+        members = objects[aliases[alias]]
+        if container == "scalar":
+            candidates = [value]
+        elif value.type == "array":
+            candidates = list(value.named_children)
+        else:
+            return
+        shown = alias if container == "scalar" else f"{alias}[]"
+        for node in candidates:
+            key = _literal_key(node)
+            member = members.get(key) if key is not None else None
             if member is None:
                 continue
             violations.append(
                 _violation(
                     rule,
-                    args[index],
-                    f"raw literal '{raw}' passed where the parameter is typed "
-                    f"'{type_name}' — reference the constant `{obj_name}.{member}` "
+                    node,
+                    f"raw literal '{key[1]}' {phrase} typed '{shown}' — "
+                    f"reference the constant `{aliases[alias]}.{member}` "
                     f"so value changes stay in one place",
                 )
             )
+
+    def param_mapping(params: Node) -> dict[int, _Slot]:
+        positional = [
+            p for p in params.named_children
+            if p.type in ("required_parameter", "optional_parameter")
+        ]
+        return {
+            index: s for index, param in enumerate(positional)
+            if (s := slot(param)) is not None
+        }
+
+    # ---- gather typed callables, variable slots, and property slots
+    func_params: dict[str, dict[int, _Slot]] = {}
+    method_params: dict[str, dict[int, _Slot] | None] = {}
+    var_slots: dict[str, _Slot | None] = {}
+    prop_slots: dict[str, dict[str, _Slot]] = {}
+    for node in _walk(root):
+        if node.type == "function_declaration":
+            name_node = node.child_by_field_name("name")
+            params = node.child_by_field_name("parameters")
+            if name_node is not None and params is not None:
+                mapping = param_mapping(params)
+                if mapping:
+                    func_params[_text(name_node)] = mapping
+        elif node.type == "method_definition":
+            name_node = node.child_by_field_name("name")
+            params = node.child_by_field_name("parameters")
+            if name_node is not None and params is not None:
+                mapping = param_mapping(params)
+                if mapping:
+                    name = _text(name_node)
+                    if name in method_params and method_params[name] != mapping:
+                        method_params[name] = None  # ambiguous across classes
+                    elif name not in method_params:
+                        method_params[name] = mapping
+        elif node.type == "variable_declarator":
+            name_node = node.child_by_field_name("name")
+            value = node.child_by_field_name("value")
+            if name_node is None or name_node.type != "identifier":
+                continue
+            name = _text(name_node)
+            if value is not None and value.type in ("arrow_function", "function_expression"):
+                params = value.child_by_field_name("parameters")
+                if params is not None:
+                    mapping = param_mapping(params)
+                    if mapping:
+                        func_params[name] = mapping
+            declared = slot(node)
+            if name in var_slots and var_slots[name] != declared:
+                var_slots[name] = None  # ambiguous re-declaration
+            elif name not in var_slots:
+                var_slots[name] = declared
+        elif node.type in ("interface_declaration", "type_alias_declaration"):
+            name_node = node.child_by_field_name("name")
+            if node.type == "interface_declaration":
+                body = node.child_by_field_name("body")
+            else:
+                value = node.child_by_field_name("value")
+                body = value if value is not None and value.type == "object_type" else None
+            if name_node is None or body is None:
+                continue
+            mapping_by_prop = {
+                _text(pname): s
+                for prop in body.named_children
+                if prop.type == "property_signature"
+                and (pname := prop.child_by_field_name("name")) is not None
+                and (s := slot(prop)) is not None
+            }
+            if mapping_by_prop:
+                prop_slots[_text(name_node)] = mapping_by_prop
+
+    # ---- use sites
+    for node in _walk(root):
+        if node.type in ("variable_declarator", "required_parameter", "optional_parameter"):
+            s = slot(node)
+            value = node.child_by_field_name("value")
+            if s is None or value is None:
+                continue
+            phrase = (
+                "initializes a variable" if node.type == "variable_declarator"
+                else "initializes a parameter default"
+            )
+            report(value, s, phrase)
+        elif node.type == "assignment_expression":
+            left = node.child_by_field_name("left")
+            right = node.child_by_field_name("right")
+            if left is None or right is None or left.type != "identifier":
+                continue
+            s = var_slots.get(_text(left))
+            if s is not None:
+                report(right, s, "assigned to a variable")
+        elif node.type in _CALLABLE_NODE_TYPES:
+            s = slot(node, "return_type")
+            body = node.child_by_field_name("body")
+            if s is None or body is None:
+                continue
+            if body.type == "statement_block":
+                for expr in _own_returns(body):
+                    report(expr, s, "returned from a function")
+            else:  # arrow expression body
+                report(body, s, "returned from a function")
+        elif node.type == "call_expression":
+            callee = node.child_by_field_name("function")
+            arguments = node.child_by_field_name("arguments")
+            if callee is None or arguments is None:
+                continue
+            if callee.type == "identifier":
+                mapping = func_params.get(_text(callee))
+            elif callee.type == "member_expression":
+                prop = callee.child_by_field_name("property")
+                mapping = method_params.get(_text(prop)) if prop is not None else None
+            else:
+                mapping = None
+            if not mapping:
+                continue
+            args = arguments.named_children
+            for index, s in mapping.items():
+                if index < len(args):
+                    report(args[index], s, "passed where the parameter is")
+
+    for type_name, obj in _typed_object_literals(root):
+        mapping_by_prop = prop_slots.get(type_name)
+        if not mapping_by_prop:
+            continue
+        for entry in obj.named_children:
+            key = entry.child_by_field_name("key") if entry.type == "pair" else None
+            value = _pair_value(entry)
+            if key is None or value is None:
+                continue
+            prop_name = _text(key).strip("'\"")
+            s = mapping_by_prop.get(prop_name)
+            if s is not None:
+                report(value, s, f"initializes property '{prop_name}'")
     return violations
 
 

@@ -304,7 +304,7 @@
     "kind": "rule",
     "language": "typescript",
     "title": "Call with the as const member, not a raw literal",
-    "guideline": "When a value is typed by a union derived from an `as const` object (`type T = typeof Obj[keyof typeof Obj]`), reference the object's member (`Obj.Member`) instead of retyping the raw literal — in call arguments, variable initializers, and parameter defaults alike: the value then has exactly one spelling, and changing or renaming it updates every use site through the object. Flagged mechanically only when the whole evidence chain — object, derived alias, annotated use site, matching literal — is visible in the file.",
+    "guideline": "When a value is typed by a union derived from an `as const` object (`type T = typeof Obj[keyof typeof Obj]`), reference the object's member (`Obj.Member`) instead of retyping the raw literal — in call arguments (functions, arrow/function expressions, methods), variable initializers and reassignments, parameter defaults, returned expressions, typed object-literal properties, and elements of `T[]`/`Array<T>`/`Set<T>` alike: the value then has exactly one spelling, and changing or renaming it updates every use site through the object. String and number members both count. Flagged mechanically only when the whole evidence chain — object, derived alias, annotated use site, matching literal — is visible in the file.",
     "metadata": {"category": "types", "tags": ["typescript", "as-const", "constants", "call-site"]},
     "rule": {
       "id": "ts-prefer-constant-callsite",

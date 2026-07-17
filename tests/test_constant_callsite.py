@@ -189,6 +189,124 @@ def test_member_parameter_default_is_fine():
     assert check(code).passed
 
 
+# --------------------------------------------------- TASK-0015 sites
+
+
+def test_reassignment_is_flagged():
+    code = SETUP + "let cur: Align = Align.Left;\ncur = 'right';\n"
+    report = check(code)
+    assert len(report.violations) == 1
+    message = report.violations[0].message
+    assert "assigned to a variable" in message
+    assert "`Align.Right`" in message
+
+
+def test_ambiguous_redeclaration_is_silent():
+    code = SETUP + (
+        "function a() {\n  let cur: Align = Align.Left;\n}\n"
+        "function b() {\n  let cur = compute();\n  cur = 'right';\n}\n"
+    )
+    assert check(code).passed
+
+
+def test_return_statement_is_flagged():
+    code = SETUP + "function fallback(): Align {\n  return 'left';\n}\n"
+    report = check(code)
+    assert len(report.violations) == 1
+    message = report.violations[0].message
+    assert "returned from a function" in message
+    assert "`Align.Left`" in message
+
+
+def test_arrow_expression_body_return_is_flagged():
+    code = SETUP + "const pick = (): Align => 'left';\n"
+    assert len(check(code).violations) == 1
+
+
+def test_nested_function_returns_stay_with_their_owner():
+    code = SETUP + (
+        "function outer(): Align {\n"
+        "  const inner = () => 'left';\n"
+        "  return Align.Left;\n"
+        "}\n"
+    )
+    assert check(code).passed
+
+
+def test_array_type_elements_are_flagged():
+    code = SETUP + "const order: Align[] = ['left', Align.Right];\n"
+    report = check(code)
+    assert len(report.violations) == 1
+    message = report.violations[0].message
+    assert "'Align[]'" in message
+    assert "`Align.Left`" in message
+
+
+def test_generic_array_wrapper_is_flagged():
+    code = SETUP + "const order: Array<Align> = ['right'];\n"
+    assert len(check(code).violations) == 1
+
+
+def test_object_property_value_is_flagged():
+    code = SETUP + (
+        "interface Config {\n  align: Align;\n  label: string;\n}\n"
+        "const cfg: Config = { align: 'left', label: 'x' };\n"
+    )
+    report = check(code)
+    assert len(report.violations) == 1
+    message = report.violations[0].message
+    assert "property 'align'" in message
+    assert "`Align.Left`" in message
+
+
+def test_satisfies_typed_property_is_flagged():
+    code = SETUP + (
+        "type Config = { align: Align };\n"
+        "const cfg = { align: 'right' } satisfies Config;\n"
+    )
+    assert len(check(code).violations) == 1
+
+
+def test_arrow_function_call_is_flagged():
+    code = SETUP + "const shout = (a: Align) => a;\nshout('left');\n"
+    assert len(check(code).violations) == 1
+
+
+def test_method_call_is_flagged():
+    code = SETUP + (
+        "class Widget {\n"
+        "  render(a: Align): void {}\n"
+        "}\n"
+        "const w = new Widget();\n"
+        "w.render('left');\n"
+    )
+    assert len(check(code).violations) == 1
+
+
+def test_conflicting_method_signatures_are_ambiguous():
+    code = SETUP + (
+        "const Tone = { Ok: 'ok' } as const;\n"
+        "type Tone = typeof Tone[keyof typeof Tone];\n"
+        "class A {\n  render(a: Align): void {}\n}\n"
+        "class B {\n  render(t: Tone, extra: Align): void {}\n}\n"
+        "const x = new A();\n"
+        "x.render('left');\n"
+    )
+    assert check(code).passed
+
+
+def test_number_valued_members_are_flagged():
+    code = (
+        "const Level = { Low: 1, High: 2 } as const;\n"
+        "type Level = typeof Level[keyof typeof Level];\n"
+        "function setLevel(level: Level): void {}\n"
+        "setLevel(1);\n"
+    )
+    report = check(code)
+    assert len(report.violations) == 1
+    assert "`Level.Low`" in report.violations[0].message
+
+
 def test_runs_on_tsx_via_dialect():
     code = (
         SETUP
