@@ -4,7 +4,7 @@
 > 규칙: [/CLAUDE.md](../../CLAUDE.md) · 새 태스크: [TEMPLATE.md](TEMPLATE.md) 복사
 > 상태: `todo` 착수 전 · `in_progress` 진행 중 · `blocked` 대기(문서에 사유) · `done` 완료+검증
 
-**마지막 태스크 번호: 0009** (새 태스크는 0010부터)
+**마지막 태스크 번호: 0015** (새 태스크는 0016부터)
 
 | ID | 제목 | 상태 | 시작 | 완료 | 주요 파일 |
 |---|---|---|---|---|---|
@@ -19,6 +19,18 @@
 | [TASK-0008](TASK-0008-optional-variant-bag-analyzer.md) | 옵셔널 난발 검출 — analysis 룰 타입 + optional-variant-bag 분석기 | done | 2026-07-13 | 2026-07-13 | `src/acode/astcore/analyzers.py`, `src/acode/astcore/rules.py`, `conventions/typescript.json`, `tests/test_optional_variant_bag.py` |
 
 | [TASK-0009](TASK-0009-record-key-inference-analyzer.md) | Record 키 넓힘 검출 — record-key-inference 분석기 | done | 2026-07-13 | 2026-07-13 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_record_key_inference.py` |
+
+| [TASK-0010](TASK-0010-four-new-ts-analyzers.md) | TS 분석기 4종 (boolean-variant-bag, stringly-literal-param, duplicate-literal-union, as-const-candidate) | done | 2026-07-16 | 2026-07-16 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_boolean_variant_bag.py`, `tests/test_stringly_literal_param.py`, `tests/test_duplicate_literal_union.py`, `tests/test_as_const_candidate.py` |
+
+| [TASK-0011](TASK-0011-literal-union-param-as-const-style.md) | literal-union-param 제안을 as const 파생 타입 스타일로 | done | 2026-07-16 | 2026-07-16 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_stringly_literal_param.py` |
+
+| [TASK-0012](TASK-0012-duplicate-union-as-const-style.md) | duplicate-literal-union 제안도 as const 파생 타입 스타일로 | done | 2026-07-16 | 2026-07-16 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_duplicate_literal_union.py` |
+
+| [TASK-0013](TASK-0013-constant-callsite-analyzer.md) | constant-callsite 분석기 — 파생 타입 파라미터는 상수 멤버로 호출 | done | 2026-07-16 | 2026-07-16 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_constant_callsite.py` |
+
+| [TASK-0014](TASK-0014-constant-initializer-extension.md) | constant-callsite 확장 — 변수 초기화·파라미터 기본값도 상수로 | done | 2026-07-16 | 2026-07-16 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_constant_callsite.py` |
+
+| [TASK-0015](TASK-0015-constant-callsite-full-coverage.md) | constant-callsite 전체 커버리지 (재대입·return·프로퍼티·배열·화살표/메서드·숫자) | done | 2026-07-16 | 2026-07-16 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_constant_callsite.py` |
 
 ## 열린 태스크 (todo / in_progress / blocked)
 

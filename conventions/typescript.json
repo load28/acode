@@ -228,6 +228,96 @@
     "bad_example": "const TYPE_COLORS: Record<string, string> = {\n  fire: '#EE8130',\n  water: '#6390F0',\n};\n"
   },
   {
+    "id": "ts-no-boolean-variant-bag",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No exclusive boolean flags — use a status union",
+    "guideline": "Booleans are for independent yes/no facts. When several boolean flags are mutually exclusive (never true together, each true on its own somewhere), they encode states of one machine: replace them with a single literal-union status key so impossible combinations (isLoading && isError) cannot be represented. Flagged mechanically from usage evidence only.",
+    "metadata": {"category": "types", "tags": ["typescript", "strict", "union", "boolean", "state"]},
+    "rule": {
+      "id": "ts-no-boolean-variant-bag",
+      "language": "typescript",
+      "type": "analysis",
+      "analyzer": "boolean-variant-bag",
+      "query": "",
+      "message": "mutually exclusive boolean flags encode one state machine; replace them with a literal-union status key"
+    },
+    "good_example": "type FetchState =\n  | { status: 'loading' }\n  | { status: 'error'; message: string }\n  | { status: 'ready'; data: string };\n",
+    "bad_example": "interface FetchState {\n  isLoading: boolean;\n  isError: boolean;\n  data?: string;\n}\nconst loading: FetchState = { isLoading: true, isError: false };\nconst failed: FetchState = { isLoading: false, isError: true };\n"
+  },
+  {
+    "id": "ts-prefer-literal-union-param",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No stringly-typed parameters over a closed value set",
+    "guideline": "A parameter typed `string` whose call sites only ever pass a fixed set of literals is stringly-typed. Hold the values in an `as const` object and type the parameter with the union derived from it (`type T = typeof Obj[keyof typeof Obj]`, same shape as the enum replacement) so typos fail to compile, completions list the valid values, and call sites reference `Obj.Member` instead of raw strings. Flagged mechanically when every direct call in the file passes a string literal and at least two distinct values occur; exported functions and indirectly referenced functions are exempt (outside callers are invisible).",
+    "metadata": {"category": "types", "tags": ["typescript", "strict", "union", "stringly-typed", "as-const"]},
+    "rule": {
+      "id": "ts-prefer-literal-union-param",
+      "language": "typescript",
+      "type": "analysis",
+      "analyzer": "stringly-literal-param",
+      "query": "",
+      "message": "string parameter is only ever called with a closed literal set; derive the union from an as const object"
+    },
+    "good_example": "const Align = {\n  Left: 'left',\n  Right: 'right',\n} as const;\n\ntype Align = typeof Align[keyof typeof Align];\n\nfunction alignLabel(align: Align): string {\n  return align;\n}\n\nalignLabel(Align.Left);\n",
+    "bad_example": "function alignLabel(align: string): string {\n  return align;\n}\nalignLabel('left');\nalignLabel('right');\n"
+  },
+  {
+    "id": "ts-no-duplicate-literal-union",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No repeated inline literal unions — derive one type from an as const object",
+    "guideline": "A literal union written inline in several places (same member set, any order) has no single source of truth: adding a member means hunting down every copy. Hold the values in an `as const` object and derive the union from it (`type T = typeof Obj[keyof typeof Obj]`, same shape as the enum replacement) — the set then changes in one place, and use sites reference `Obj.Member` constants instead of scattering raw literals. Alias declarations themselves are never flagged; when an alias for the set already exists the fix is to use it.",
+    "metadata": {"category": "types", "tags": ["typescript", "union", "dry", "as-const"]},
+    "rule": {
+      "id": "ts-no-duplicate-literal-union",
+      "language": "typescript",
+      "type": "analysis",
+      "analyzer": "duplicate-literal-union",
+      "query": "",
+      "message": "literal union is repeated inline; derive one union type from an as const object"
+    },
+    "good_example": "const Size = {\n  Sm: 'sm',\n  Md: 'md',\n  Lg: 'lg',\n} as const;\n\ntype Size = typeof Size[keyof typeof Size];\n\nfunction badge(size: Size): string {\n  return size;\n}\n\nfunction icon(size: Size): string {\n  return size;\n}\n",
+    "bad_example": "function badge(size: 'sm' | 'md' | 'lg'): string {\n  return size;\n}\nfunction icon(size: 'sm' | 'md' | 'lg'): string {\n  return size;\n}\n"
+  },
+  {
+    "id": "ts-prefer-as-const-object",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "Freeze never-mutated literal constants with as const",
+    "guideline": "A module-level const initialized with a literal object (primitive values only) that the file never mutates is a lookup table: freeze it with `as const` so the compiler keeps the exact keys and literal values, enabling `keyof typeof` key unions and precise value types downstream. Flagged mechanically only when no reassignment, property write/delete, or Object.assign against the constant exists in the file.",
+    "metadata": {"category": "types", "tags": ["typescript", "as-const", "inference", "immutability"]},
+    "rule": {
+      "id": "ts-prefer-as-const-object",
+      "language": "typescript",
+      "type": "analysis",
+      "analyzer": "as-const-candidate",
+      "query": "",
+      "message": "never-mutated literal constant; freeze it with `as const` to keep exact key and value types"
+    },
+    "good_example": "const TYPE_COLORS = {\n  fire: '#EE8130',\n  water: '#6390F0',\n} as const;\n\nexport type ElementType = keyof typeof TYPE_COLORS;\n",
+    "bad_example": "const TYPE_COLORS = {\n  fire: '#EE8130',\n  water: '#6390F0',\n};\n"
+  },
+  {
+    "id": "ts-prefer-constant-callsite",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "Call with the as const member, not a raw literal",
+    "guideline": "When a value is typed by a union derived from an `as const` object (`type T = typeof Obj[keyof typeof Obj]`), reference the object's member (`Obj.Member`) instead of retyping the raw literal — in call arguments (functions, arrow/function expressions, methods), variable initializers and reassignments, parameter defaults, returned expressions, typed object-literal properties, and elements of `T[]`/`Array<T>`/`Set<T>` alike: the value then has exactly one spelling, and changing or renaming it updates every use site through the object. String and number members both count. Flagged mechanically only when the whole evidence chain — object, derived alias, annotated use site, matching literal — is visible in the file.",
+    "metadata": {"category": "types", "tags": ["typescript", "as-const", "constants", "call-site"]},
+    "rule": {
+      "id": "ts-prefer-constant-callsite",
+      "language": "typescript",
+      "type": "analysis",
+      "analyzer": "constant-callsite",
+      "query": "",
+      "message": "raw literal passed where the parameter is typed by an as const derived union; reference the object's member instead"
+    },
+    "good_example": "const Align = {\n  Left: 'left',\n  Right: 'right',\n} as const;\n\ntype Align = typeof Align[keyof typeof Align];\n\nconst fallback: Align = Align.Right;\n\nfunction alignLabel(align: Align = Align.Left): string {\n  return align;\n}\n\nalignLabel(Align.Left);\n",
+    "bad_example": "const Align = {\n  Left: 'left',\n  Right: 'right',\n} as const;\n\ntype Align = typeof Align[keyof typeof Align];\n\nconst fallback: Align = 'right';\n\nfunction alignLabel(align: Align): string {\n  return align;\n}\n\nalignLabel('left');\n"
+  },
+  {
     "id": "ts-pattern-derived-record-keys",
     "kind": "pattern",
     "language": "typescript",
