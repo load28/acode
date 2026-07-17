@@ -300,6 +300,24 @@
     "bad_example": "const TYPE_COLORS = {\n  fire: '#EE8130',\n  water: '#6390F0',\n};\n"
   },
   {
+    "id": "ts-prefer-constant-callsite",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "Call with the as const member, not a raw literal",
+    "guideline": "When a parameter is typed by a union derived from an `as const` object (`type T = typeof Obj[keyof typeof Obj]`), pass the object's member (`Obj.Member`) instead of retyping the raw literal: the value then has exactly one spelling, and changing or renaming it updates every call site through the object. Flagged mechanically only when the whole evidence chain — object, derived alias, annotated parameter, matching literal — is visible in the file.",
+    "metadata": {"category": "types", "tags": ["typescript", "as-const", "constants", "call-site"]},
+    "rule": {
+      "id": "ts-prefer-constant-callsite",
+      "language": "typescript",
+      "type": "analysis",
+      "analyzer": "constant-callsite",
+      "query": "",
+      "message": "raw literal passed where the parameter is typed by an as const derived union; reference the object's member instead"
+    },
+    "good_example": "const Align = {\n  Left: 'left',\n  Right: 'right',\n} as const;\n\ntype Align = typeof Align[keyof typeof Align];\n\nfunction alignLabel(align: Align): string {\n  return align;\n}\n\nalignLabel(Align.Left);\n",
+    "bad_example": "const Align = {\n  Left: 'left',\n  Right: 'right',\n} as const;\n\ntype Align = typeof Align[keyof typeof Align];\n\nfunction alignLabel(align: Align): string {\n  return align;\n}\n\nalignLabel('left');\n"
+  },
+  {
     "id": "ts-pattern-derived-record-keys",
     "kind": "pattern",
     "language": "typescript",

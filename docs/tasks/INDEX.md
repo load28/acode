@@ -4,7 +4,7 @@
 > 규칙: [/CLAUDE.md](../../CLAUDE.md) · 새 태스크: [TEMPLATE.md](TEMPLATE.md) 복사
 > 상태: `todo` 착수 전 · `in_progress` 진행 중 · `blocked` 대기(문서에 사유) · `done` 완료+검증
 
-**마지막 태스크 번호: 0012** (새 태스크는 0013부터)
+**마지막 태스크 번호: 0013** (새 태스크는 0014부터)
 
 | ID | 제목 | 상태 | 시작 | 완료 | 주요 파일 |
 |---|---|---|---|---|---|
@@ -25,6 +25,8 @@
 | [TASK-0011](TASK-0011-literal-union-param-as-const-style.md) | literal-union-param 제안을 as const 파생 타입 스타일로 | done | 2026-07-16 | 2026-07-16 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_stringly_literal_param.py` |
 
 | [TASK-0012](TASK-0012-duplicate-union-as-const-style.md) | duplicate-literal-union 제안도 as const 파생 타입 스타일로 | done | 2026-07-16 | 2026-07-16 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_duplicate_literal_union.py` |
+
+| [TASK-0013](TASK-0013-constant-callsite-analyzer.md) | constant-callsite 분석기 — 파생 타입 파라미터는 상수 멤버로 호출 | done | 2026-07-16 | 2026-07-16 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_constant_callsite.py` |
 
 ## 열린 태스크 (todo / in_progress / blocked)
 

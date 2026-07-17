@@ -633,6 +633,144 @@ def as_const_candidate(root: Node, rule: Rule, language: str) -> list[RuleViolat
     return violations
 
 
+def _as_const_string_members(root: Node) -> dict[str, dict[str, str]]:
+    """Map ``X = { K: 'v', ... } as const`` declarations to {value: member}.
+
+    Only identifier keys with string-literal values qualify — anything else
+    makes the ``X.Member`` suggestion unsound, so the object is dropped.
+    """
+    objects: dict[str, dict[str, str]] = {}
+    for declarator in _walk(root):
+        if declarator.type != "variable_declarator":
+            continue
+        name_node = declarator.child_by_field_name("name")
+        value = declarator.child_by_field_name("value")
+        if (
+            name_node is None
+            or name_node.type != "identifier"
+            or value is None
+            or value.type != "as_expression"
+            or not any(c.type == "const" for c in value.children)
+        ):
+            continue
+        obj = next((c for c in value.named_children if c.type == "object"), None)
+        if obj is None:
+            continue
+        members: dict[str, str] = {}
+        for entry in obj.named_children:
+            key = entry.child_by_field_name("key") if entry.type == "pair" else None
+            val = _pair_value(entry)
+            if key is None or key.type != "property_identifier" or val is None or val.type != "string":
+                members = {}
+                break
+            members.setdefault(_text(val).strip("'\""), _text(key))
+        if members:
+            objects[_text(name_node)] = members
+    return objects
+
+
+def _derived_union_aliases(root: Node, objects: dict[str, dict[str, str]]) -> dict[str, str]:
+    """Map ``type T = typeof X[keyof typeof X]`` aliases to their object X."""
+    aliases: dict[str, str] = {}
+    for alias in _walk(root):
+        if alias.type != "type_alias_declaration":
+            continue
+        name = alias.child_by_field_name("name")
+        value = alias.child_by_field_name("value")
+        if name is None or value is None or value.type != "lookup_type":
+            continue
+        named = value.named_children
+        if len(named) != 2 or named[0].type != "type_query" or named[1].type != "index_type_query":
+            continue
+        outer = named[0].named_children
+        inner_query = named[1].named_children
+        if len(outer) != 1 or outer[0].type != "identifier":
+            continue
+        if len(inner_query) != 1 or inner_query[0].type != "type_query":
+            continue
+        inner = inner_query[0].named_children
+        if len(inner) != 1 or inner[0].type != "identifier":
+            continue
+        obj_name = _text(outer[0])
+        if obj_name == _text(inner[0]) and obj_name in objects:
+            aliases[_text(name)] = obj_name
+    return aliases
+
+
+def constant_callsite(root: Node, rule: Rule, language: str) -> list[RuleViolation]:
+    """Flag raw string literals passed where the parameter is typed by a
+    union derived from an ``as const`` object — the call should reference
+    the object's member instead, so value changes stay in one place.
+
+    The full evidence chain must be visible in the file: the as const
+    object (identifier keys, string values), the derived alias
+    ``type T = typeof X[keyof typeof X]``, a function declaration whose
+    parameter is annotated ``T``, and a direct call passing a string
+    literal that matches one of X's values. Literals outside X's values
+    are the compiler's job (type error) and stay silent.
+    """
+    objects = _as_const_string_members(root)
+    if not objects:
+        return []
+    aliases = _derived_union_aliases(root, objects)
+    if not aliases:
+        return []
+
+    func_params: dict[str, dict[int, str]] = {}
+    for func in _walk(root):
+        if func.type != "function_declaration":
+            continue
+        name_node = func.child_by_field_name("name")
+        params = func.child_by_field_name("parameters")
+        if name_node is None or params is None:
+            continue
+        positional = [
+            p for p in params.named_children
+            if p.type in ("required_parameter", "optional_parameter")
+        ]
+        mapping = {}
+        for index, param in enumerate(positional):
+            annotation = param.child_by_field_name("type")
+            if annotation is None:
+                continue
+            named = annotation.named_children
+            if len(named) == 1 and named[0].type == "type_identifier" and _text(named[0]) in aliases:
+                mapping[index] = _text(named[0])
+        if mapping:
+            func_params[_text(name_node)] = mapping
+
+    violations = []
+    for call in _walk(root):
+        if call.type != "call_expression":
+            continue
+        callee = call.child_by_field_name("function")
+        arguments = call.child_by_field_name("arguments")
+        if callee is None or callee.type != "identifier" or arguments is None:
+            continue
+        mapping = func_params.get(_text(callee))
+        if not mapping:
+            continue
+        args = arguments.named_children
+        for index, type_name in mapping.items():
+            if index >= len(args) or args[index].type != "string":
+                continue
+            raw = _text(args[index]).strip("'\"")
+            obj_name = aliases[type_name]
+            member = objects[obj_name].get(raw)
+            if member is None:
+                continue
+            violations.append(
+                _violation(
+                    rule,
+                    args[index],
+                    f"raw literal '{raw}' passed where the parameter is typed "
+                    f"'{type_name}' — reference the constant `{obj_name}.{member}` "
+                    f"so value changes stay in one place",
+                )
+            )
+    return violations
+
+
 ANALYZERS: dict[str, Callable[[Node, Rule, str], list[RuleViolation]]] = {
     "optional-variant-bag": optional_variant_bag,
     "record-key-inference": record_key_inference,
@@ -640,6 +778,7 @@ ANALYZERS: dict[str, Callable[[Node, Rule, str], list[RuleViolation]]] = {
     "stringly-literal-param": stringly_literal_param,
     "duplicate-literal-union": duplicate_literal_union,
     "as-const-candidate": as_const_candidate,
+    "constant-callsite": constant_callsite,
 }
 
 
