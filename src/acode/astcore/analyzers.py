@@ -697,15 +697,28 @@ def _derived_union_aliases(root: Node, objects: dict[str, dict[str, str]]) -> di
     return aliases
 
 
+def _annotated_alias_name(node: Node) -> str | None:
+    """The bare type-identifier a node's ``type`` annotation names, if any."""
+    annotation = node.child_by_field_name("type")
+    if annotation is None:
+        return None
+    named = annotation.named_children
+    if len(named) == 1 and named[0].type == "type_identifier":
+        return _text(named[0])
+    return None
+
+
 def constant_callsite(root: Node, rule: Rule, language: str) -> list[RuleViolation]:
-    """Flag raw string literals passed where the parameter is typed by a
-    union derived from an ``as const`` object — the call should reference
-    the object's member instead, so value changes stay in one place.
+    """Flag raw string literals where a value typed by a union derived from
+    an ``as const`` object is expected — call arguments, variable
+    initializers, and parameter defaults should reference the object's
+    member instead, so value changes stay in one place.
 
     The full evidence chain must be visible in the file: the as const
     object (identifier keys, string values), the derived alias
-    ``type T = typeof X[keyof typeof X]``, a function declaration whose
-    parameter is annotated ``T``, and a direct call passing a string
+    ``type T = typeof X[keyof typeof X]``, and a use site annotated ``T``
+    — a file-local function's parameter fed by a direct call, a typed
+    variable declarator, or a parameter default — receiving a string
     literal that matches one of X's values. Literals outside X's values
     are the compiler's job (type error) and stay silent.
     """
@@ -730,16 +743,37 @@ def constant_callsite(root: Node, rule: Rule, language: str) -> list[RuleViolati
         ]
         mapping = {}
         for index, param in enumerate(positional):
-            annotation = param.child_by_field_name("type")
-            if annotation is None:
-                continue
-            named = annotation.named_children
-            if len(named) == 1 and named[0].type == "type_identifier" and _text(named[0]) in aliases:
-                mapping[index] = _text(named[0])
+            type_name = _annotated_alias_name(param)
+            if type_name in aliases:
+                mapping[index] = type_name
         if mapping:
             func_params[_text(name_node)] = mapping
 
     violations = []
+    for node in _walk(root):
+        if node.type not in ("variable_declarator", "required_parameter", "optional_parameter"):
+            continue
+        type_name = _annotated_alias_name(node)
+        if type_name not in aliases:
+            continue
+        value = node.child_by_field_name("value")
+        if value is None or value.type != "string":
+            continue
+        raw = _text(value).strip("'\"")
+        obj_name = aliases[type_name]
+        member = objects[obj_name].get(raw)
+        if member is None:
+            continue
+        site = "a variable" if node.type == "variable_declarator" else "a parameter default"
+        violations.append(
+            _violation(
+                rule,
+                value,
+                f"raw literal '{raw}' initializes {site} typed '{type_name}' — "
+                f"reference the constant `{obj_name}.{member}` so value changes "
+                f"stay in one place",
+            )
+        )
     for call in _walk(root):
         if call.type != "call_expression":
             continue

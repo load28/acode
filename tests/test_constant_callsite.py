@@ -143,6 +143,52 @@ def test_multiple_derived_params_are_checked_independently():
     assert any("`Tone.Warn`" in m for m in messages)
 
 
+def test_typed_variable_init_is_flagged():
+    report = check(SETUP + "const fallback: Align = 'right';\n")
+    assert len(report.violations) == 1
+    message = report.violations[0].message
+    assert "`Align.Right`" in message
+    assert "variable" in message
+
+
+def test_let_variable_init_is_also_flagged():
+    assert len(check(SETUP + "let current: Align = 'left';\n").violations) == 1
+
+
+def test_variable_member_init_is_fine():
+    assert check(SETUP + "const fallback: Align = Align.Right;\n").passed
+
+
+def test_untyped_variable_init_is_silent():
+    assert check(SETUP + "const fallback = 'left';\n").passed
+
+
+def test_parameter_default_is_flagged():
+    code = (
+        "const Align = { Left: 'left', Right: 'right' } as const;\n"
+        "type Align = typeof Align[keyof typeof Align];\n"
+        "function alignLabel(align: Align = 'left'): string {\n"
+        "  return align;\n"
+        "}\n"
+    )
+    report = check(code)
+    assert len(report.violations) == 1
+    message = report.violations[0].message
+    assert "`Align.Left`" in message
+    assert "parameter default" in message
+
+
+def test_member_parameter_default_is_fine():
+    code = (
+        "const Align = { Left: 'left', Right: 'right' } as const;\n"
+        "type Align = typeof Align[keyof typeof Align];\n"
+        "function alignLabel(align: Align = Align.Left): string {\n"
+        "  return align;\n"
+        "}\n"
+    )
+    assert check(code).passed
+
+
 def test_runs_on_tsx_via_dialect():
     code = (
         SETUP

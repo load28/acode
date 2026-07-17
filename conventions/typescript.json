@@ -304,7 +304,7 @@
     "kind": "rule",
     "language": "typescript",
     "title": "Call with the as const member, not a raw literal",
-    "guideline": "When a parameter is typed by a union derived from an `as const` object (`type T = typeof Obj[keyof typeof Obj]`), pass the object's member (`Obj.Member`) instead of retyping the raw literal: the value then has exactly one spelling, and changing or renaming it updates every call site through the object. Flagged mechanically only when the whole evidence chain — object, derived alias, annotated parameter, matching literal — is visible in the file.",
+    "guideline": "When a value is typed by a union derived from an `as const` object (`type T = typeof Obj[keyof typeof Obj]`), reference the object's member (`Obj.Member`) instead of retyping the raw literal — in call arguments, variable initializers, and parameter defaults alike: the value then has exactly one spelling, and changing or renaming it updates every use site through the object. Flagged mechanically only when the whole evidence chain — object, derived alias, annotated use site, matching literal — is visible in the file.",
     "metadata": {"category": "types", "tags": ["typescript", "as-const", "constants", "call-site"]},
     "rule": {
       "id": "ts-prefer-constant-callsite",
@@ -314,8 +314,8 @@
       "query": "",
       "message": "raw literal passed where the parameter is typed by an as const derived union; reference the object's member instead"
     },
-    "good_example": "const Align = {\n  Left: 'left',\n  Right: 'right',\n} as const;\n\ntype Align = typeof Align[keyof typeof Align];\n\nfunction alignLabel(align: Align): string {\n  return align;\n}\n\nalignLabel(Align.Left);\n",
-    "bad_example": "const Align = {\n  Left: 'left',\n  Right: 'right',\n} as const;\n\ntype Align = typeof Align[keyof typeof Align];\n\nfunction alignLabel(align: Align): string {\n  return align;\n}\n\nalignLabel('left');\n"
+    "good_example": "const Align = {\n  Left: 'left',\n  Right: 'right',\n} as const;\n\ntype Align = typeof Align[keyof typeof Align];\n\nconst fallback: Align = Align.Right;\n\nfunction alignLabel(align: Align = Align.Left): string {\n  return align;\n}\n\nalignLabel(Align.Left);\n",
+    "bad_example": "const Align = {\n  Left: 'left',\n  Right: 'right',\n} as const;\n\ntype Align = typeof Align[keyof typeof Align];\n\nconst fallback: Align = 'right';\n\nfunction alignLabel(align: Align): string {\n  return align;\n}\n\nalignLabel('left');\n"
   },
   {
     "id": "ts-pattern-derived-record-keys",
