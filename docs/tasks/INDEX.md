@@ -4,7 +4,7 @@
 > 규칙: [/CLAUDE.md](../../CLAUDE.md) · 새 태스크: [TEMPLATE.md](TEMPLATE.md) 복사
 > 상태: `todo` 착수 전 · `in_progress` 진행 중 · `blocked` 대기(문서에 사유) · `done` 완료+검증
 
-**마지막 태스크 번호: 0015** (새 태스크는 0016부터)
+**마지막 태스크 번호: 0016** (새 태스크는 0017부터)
 
 | ID | 제목 | 상태 | 시작 | 완료 | 주요 파일 |
 |---|---|---|---|---|---|
@@ -31,6 +31,8 @@
 | [TASK-0014](TASK-0014-constant-initializer-extension.md) | constant-callsite 확장 — 변수 초기화·파라미터 기본값도 상수로 | done | 2026-07-16 | 2026-07-16 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_constant_callsite.py` |
 
 | [TASK-0015](TASK-0015-constant-callsite-full-coverage.md) | constant-callsite 전체 커버리지 (재대입·return·프로퍼티·배열·화살표/메서드·숫자) | done | 2026-07-16 | 2026-07-16 | `src/acode/astcore/analyzers.py`, `conventions/typescript.json`, `tests/test_constant_callsite.py` |
+
+| [TASK-0016](TASK-0016-rules-official-site.md) | 룰 공식 페이지 — TanStack Start 프리렌더(SSG) + GitHub Pages 자동 배포 | done | 2026-07-17 | 2026-07-17 | `site/**`, `scripts/export_site_data.py`, `.github/workflows/pages.yml` |
 
 ## 열린 태스크 (todo / in_progress / blocked)
 
