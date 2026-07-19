@@ -4,7 +4,7 @@
 > 규칙: [/CLAUDE.md](../../CLAUDE.md) · 새 태스크: [TEMPLATE.md](TEMPLATE.md) 복사
 > 상태: `todo` 착수 전 · `in_progress` 진행 중 · `blocked` 대기(문서에 사유) · `done` 완료+검증
 
-**마지막 태스크 번호: 0016** (새 태스크는 0017부터)
+**마지막 태스크 번호: 0017** (새 태스크는 0018부터)
 
 | ID | 제목 | 상태 | 시작 | 완료 | 주요 파일 |
 |---|---|---|---|---|---|
@@ -34,12 +34,16 @@
 
 | [TASK-0016](TASK-0016-rules-official-site.md) | 룰 공식 페이지 — TanStack Start 프리렌더(SSG) + GitHub Pages 자동 배포 | done | 2026-07-17 | 2026-07-17 | `site/**`, `scripts/export_site_data.py`, `.github/workflows/pages.yml` |
 
+| [TASK-0017](TASK-0017-typescript-rule-proposal.md) | TS 신규 룰 제안 10종 (쿼리 룰 6 — 엔진 검증 완료 + 분석기 룰 4 설계 스케치) | done | 2026-07-19 | 2026-07-19 | `docs/tasks/TASK-0017-typescript-rule-proposal.md` |
+
 ## 열린 태스크 (todo / in_progress / blocked)
 
 없음.
 
 ## 백로그 (아이디어 — 착수 시 태스크로 승격)
 
+- TASK-0017 제안 A 구현: 검증된 쿼리 룰 6종을 `conventions/typescript.json`에 추가 + 테스트 (태스크 1개 규모)
+- TASK-0017 제안 B 구현: 분석기 4종 — `switch-exhaustiveness`(권장 첫 착수), `stringly-literal-return`, `duplicate-object-type`, `derived-guard` (각 태스크 1개 규모)
 - ADK 신규 `Workflow`(그래프) API 마이그레이션 — SequentialAgent/LoopAgent deprecation 해소
 - 언어/프레임워크별 시드 컨벤션 확충 (Go, Java, Rust, NestJS, Spring 등 — 문법 휠은 준비됨)
 - 대규모 코퍼스(수만 건) 대비: BM25 증분 색인 또는 SQLite FTS5 전환
