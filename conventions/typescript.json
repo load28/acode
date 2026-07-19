@@ -409,6 +409,60 @@
     "bad_example": "function greet(name: string): string {\n  return \"hello \" + name + \"!\";\n}\n"
   },
   {
+    "id": "ts-no-angle-bracket-assertion",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No angle-bracket type assertions",
+    "guideline": "The legacy `<T>expr` assertion is the same checker override as `as` and is forbidden for the same reason: prove the type with narrowing or a type guard instead. This includes `<const>expr` — the repository standard spelling for const assertions is `as const`, one spelling per meaning. (In .tsx files this syntax cannot even be parsed, so nothing is lost.)",
+    "metadata": {"category": "types", "tags": ["typescript", "strict", "assertion"]},
+    "rule": {
+      "id": "ts-no-angle-bracket-assertion",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "(type_assertion) @bad",
+      "capture": "bad",
+      "message": "angle-bracket assertion (`<T>expr`) is forbidden; prove the type with narrowing, or spell const assertions `as const`"
+    },
+    "good_example": "const el = document.getElementById(\"app\");\nif (el instanceof HTMLInputElement) {\n  el.focus();\n}\n",
+    "bad_example": "const el = <HTMLInputElement>document.getElementById(\"app\");\nel.focus();\n"
+  },
+  {
+    "id": "ts-no-wrapper-object-types",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No wrapper object types (String, Number, Object, Function, ...)",
+    "guideline": "String/Number/Boolean/Symbol/BigInt are boxed wrappers that also accept non-primitive objects and break comparison semantics; Object accepts any non-nullish value; Function accepts any callable with zero signature checking. All of them look like types but constrain almost nothing. Use the lowercase primitives (string, number, boolean), a concrete call signature ((x: T) => R) instead of Function, and object or a concrete shape instead of Object.",
+    "metadata": {"category": "types", "tags": ["typescript", "strict", "primitives"]},
+    "rule": {
+      "id": "ts-no-wrapper-object-types",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "((type_identifier) @bad (#match? @bad \"^(String|Number|Boolean|Object|Symbol|BigInt|Function)$\"))",
+      "capture": "bad",
+      "message": "wrapper object type constrains nothing; use the lowercase primitive, a concrete call signature, or a concrete object shape"
+    },
+    "good_example": "function describe(name: string, count: number, cb: () => void): { name: string; count: number } {\n  cb();\n  return { name, count };\n}\nconst label = String(42);\n",
+    "bad_example": "function describe(name: String, count: Number, cb: Function): Object {\n  cb();\n  return { name, count };\n}\n"
+  },
+  {
+    "id": "ts-no-implicit-any-param",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No unannotated parameters in function declarations and methods",
+    "guideline": "Parameters of function declarations and class methods have no contextual type: leaving off the annotation makes them implicit any — the most common way any leaks past the explicit-any ban. Annotate every parameter. Arrow-function parameters are exempt on purpose: in callback position (e.g. array.map((n) => ...)) the context types them precisely, so forcing annotations there is noise.",
+    "metadata": {"category": "types", "tags": ["typescript", "strict", "implicit-any"]},
+    "rule": {
+      "id": "ts-no-implicit-any-param",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "[(function_declaration parameters: (formal_parameters (required_parameter pattern: (identifier) !type) @bad)) (function_declaration parameters: (formal_parameters (optional_parameter pattern: (identifier) !type) @bad)) (method_definition parameters: (formal_parameters (required_parameter pattern: (identifier) !type) @bad)) (method_definition parameters: (formal_parameters (optional_parameter pattern: (identifier) !type) @bad))]",
+      "capture": "bad",
+      "message": "parameter without a type annotation is implicit any; annotate it"
+    },
+    "good_example": "function add(a: number, b?: number): number {\n  return a + (b ?? 0);\n}\nconst doubled = [1, 2].map((n) => n * 2);\n",
+    "bad_example": "function add(a, b?) {\n  return a + (b ?? 0);\n}\nclass Store {\n  set(key) {\n    return key;\n  }\n}\n"
+  },
+  {
     "id": "ts-pattern-derived-record-keys",
     "kind": "pattern",
     "language": "typescript",
