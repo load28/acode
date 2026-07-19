@@ -4,7 +4,7 @@
 > 규칙: [/CLAUDE.md](../../CLAUDE.md) · 새 태스크: [TEMPLATE.md](TEMPLATE.md) 복사
 > 상태: `todo` 착수 전 · `in_progress` 진행 중 · `blocked` 대기(문서에 사유) · `done` 완료+검증
 
-**마지막 태스크 번호: 0018** (새 태스크는 0019부터)
+**마지막 태스크 번호: 0020** (새 태스크는 0021부터)
 
 | ID | 제목 | 상태 | 시작 | 완료 | 주요 파일 |
 |---|---|---|---|---|---|
@@ -38,6 +38,10 @@
 
 | [TASK-0018](TASK-0018-five-ts-query-rules.md) | TS 쿼리 룰 5종 구현 (no-type-assertion, expect-error-needs-reason, class-pascal-case, no-nested-ternary, prefer-template-literal) | done | 2026-07-19 | 2026-07-19 | `conventions/typescript.json`, `tests/test_ts_query_rules.py` |
 
+| [TASK-0019](TASK-0019-strict-type-rule-proposal.md) | 강한 타입 제약 룰 제안 10종 (쿼리 룰 6 — 엔진 검증 완료 + 분석기 룰 2 + 패턴 2) | done | 2026-07-19 | 2026-07-19 | `docs/tasks/TASK-0019-strict-type-rule-proposal.md` |
+
+| [TASK-0020](TASK-0020-three-strict-type-rules.md) | 강타입 핵심 쿼리 룰 3종 구현 (no-angle-bracket-assertion, no-wrapper-object-types, no-implicit-any-param) | done | 2026-07-19 | 2026-07-19 | `conventions/typescript.json`, `tests/test_strict_type_rules.py` |
+
 ## 열린 태스크 (todo / in_progress / blocked)
 
 없음.
@@ -45,6 +49,9 @@
 ## 백로그 (아이디어 — 착수 시 태스크로 승격)
 
 - TASK-0017 제안 A6 `ts-no-default-export`: 채택 여부 결정 대기 (프레임워크 관례 확인 필요 — A1~A5는 TASK-0018에서 구현됨)
+- ~~TASK-0019 제안 A 구현~~ → 핵심 3종은 TASK-0020에서 구현됨. 나머지 3종(`explicit-export-return-type`, `no-empty-object-type`, `no-export-let`)은 **미채택 종결** (소음/빈도 사유 — 재론 시 TASK-0019의 검증된 쿼리 사용 가능)
+- TASK-0019 제안 B 구현: 분석기 2종 — `satisfies-candidate`(권장 첫 착수), `single-use-type-param` (각 태스크 1개 규모)
+- TASK-0019 제안 C: 패턴 2종 (`branded-type`, `unknown-boundary`) — A 구현 태스크에 합류 가능, 단 C1은 브랜드 생성자 `as` 단언 예외 정책 선결정 필요
 - TASK-0017 제안 B 구현: 분석기 4종 — `switch-exhaustiveness`(권장 첫 착수), `stringly-literal-return`, `duplicate-object-type`, `derived-guard` (각 태스크 1개 규모)
 - ADK 신규 `Workflow`(그래프) API 마이그레이션 — SequentialAgent/LoopAgent deprecation 해소
 - 언어/프레임워크별 시드 컨벤션 확충 (Go, Java, Rust, NestJS, Spring 등 — 문법 휠은 준비됨)
