@@ -318,6 +318,97 @@
     "bad_example": "const Align = {\n  Left: 'left',\n  Right: 'right',\n} as const;\n\ntype Align = typeof Align[keyof typeof Align];\n\nconst fallback: Align = 'right';\n\nfunction alignLabel(align: Align): string {\n  return align;\n}\n\nalignLabel('left');\n"
   },
   {
+    "id": "ts-no-type-assertion",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No as type assertions (except as const)",
+    "guideline": "Never override the checker with an `as` assertion — including double assertions (`as unknown as T`), which are just two stacked overrides. Prove the type instead: narrow with typeof/instanceof/in, use a type guard, or fix the type at its source. `as const` is the one exception: it narrows to the literal type rather than overriding the checker. If an assertion is truly unavoidable, make the debt explicit with `@ts-expect-error` plus a reason.",
+    "metadata": {"category": "types", "tags": ["typescript", "strict", "assertion"]},
+    "rule": {
+      "id": "ts-no-type-assertion",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "((as_expression) @bad (#not-match? @bad \"as\\\\s+const$\"))",
+      "capture": "bad",
+      "message": "`as` assertion is forbidden (except `as const`); prove the type with narrowing or a type guard"
+    },
+    "good_example": "const el = document.querySelector(\"#app\");\nif (el instanceof HTMLElement) {\n  el.focus();\n}\n",
+    "bad_example": "const el = document.querySelector(\"#app\") as HTMLElement;\nel.focus();\n"
+  },
+  {
+    "id": "ts-expect-error-needs-reason",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "@ts-expect-error requires a reason",
+    "guideline": "A bare @ts-expect-error hides why the checker is being silenced, so the suppression outlives its cause unnoticed. State the reason (ideally with an issue reference) on the same line; the comment must not end at the directive.",
+    "metadata": {"category": "types", "tags": ["typescript", "strict"]},
+    "rule": {
+      "id": "ts-expect-error-needs-reason",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "((comment) @bad (#match? @bad \"@ts-expect-error\\\\s*$\"))",
+      "capture": "bad",
+      "message": "@ts-expect-error requires a reason on the same line"
+    },
+    "good_example": "// @ts-expect-error TODO(#123): upstream types lag the runtime value\nconst x: number = compute();\n",
+    "bad_example": "// @ts-expect-error\nconst x: number = compute();\n"
+  },
+  {
+    "id": "ts-class-pascal-case",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "Classes are PascalCase",
+    "guideline": "Class names use PascalCase, matching interfaces and type aliases.",
+    "metadata": {"category": "naming", "tags": ["naming"]},
+    "rule": {
+      "id": "ts-class-pascal-case",
+      "language": "typescript",
+      "type": "naming",
+      "query": "(class_declaration name: (type_identifier) @name)",
+      "capture": "name",
+      "regex": "[A-Z][A-Za-z0-9]*",
+      "message": "class names must be PascalCase"
+    },
+    "good_example": "class UserStore {\n  private users: string[] = [];\n}\n",
+    "bad_example": "class user_store {\n  private users: string[] = [];\n}\n"
+  },
+  {
+    "id": "ts-no-nested-ternary",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No nested ternaries",
+    "guideline": "A ternary inside a ternary hides the branch precedence; use if/else or early returns so each branch reads on its own line.",
+    "metadata": {"category": "readability", "tags": ["readability"]},
+    "rule": {
+      "id": "ts-no-nested-ternary",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "[(ternary_expression consequence: (ternary_expression) @bad) (ternary_expression alternative: (ternary_expression) @bad) (ternary_expression consequence: (parenthesized_expression (ternary_expression) @bad)) (ternary_expression alternative: (parenthesized_expression (ternary_expression) @bad))]",
+      "capture": "bad",
+      "message": "nested ternaries are forbidden; use if/else or an early return"
+    },
+    "good_example": "function label(a: boolean, b: boolean): string {\n  if (a) {\n    return \"x\";\n  }\n  return b ? \"y\" : \"z\";\n}\n",
+    "bad_example": "function label(a: boolean, b: boolean): string {\n  return a ? \"x\" : b ? \"y\" : \"z\";\n}\n"
+  },
+  {
+    "id": "ts-prefer-template-literal",
+    "kind": "rule",
+    "language": "typescript",
+    "title": "No string concatenation with + — use template literals",
+    "guideline": "When a string literal appears on either side of +, the expression is string building: use a template literal so the shape of the result is visible and every interpolation point is explicit.",
+    "metadata": {"category": "readability", "tags": ["readability", "es6"]},
+    "rule": {
+      "id": "ts-prefer-template-literal",
+      "language": "typescript",
+      "type": "forbid",
+      "query": "[(binary_expression left: (string) @bad operator: \"+\") (binary_expression operator: \"+\" right: (string) @bad)]",
+      "capture": "bad",
+      "message": "string concatenation with + is forbidden; use a template literal"
+    },
+    "good_example": "function greet(name: string): string {\n  return `hello ${name}!`;\n}\n",
+    "bad_example": "function greet(name: string): string {\n  return \"hello \" + name + \"!\";\n}\n"
+  },
+  {
     "id": "ts-pattern-derived-record-keys",
     "kind": "pattern",
     "language": "typescript",
